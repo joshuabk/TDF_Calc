@@ -1,0 +1,126 @@
+{% extends "calculators/base.html" %}
+{% block title %}TDF Calculator{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>TDF — Fractions to Add After a Treatment Break</h1>
+  <p>Time-Dose-Fractionation model (Orton &amp; Ellis). Enter the original prescription, the treatment delivered
+     before the break, and the proposed resumption schedule. The calculator returns the number of fractions to add
+     at the same dose per fraction to recover the prescribed TDF.</p>
+</div>
+
+<div class="grid">
+  <form method="post" class="card" novalidate>
+    {% csrf_token %}
+    <div class="card-head"><h2>Inputs</h2><span class="hint">Dose in cGy</span></div>
+    <div class="card-body">
+      {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+      {% if error %}<div class="form-errors">{{ error }}</div>{% endif %}
+
+      <fieldset>
+        <legend>Initial prescription</legend>
+        <div class="fields">
+          {% include "calculators/_field.html" with field=form.dose_per_fx_cgy %}
+          {% include "calculators/_field.html" with field=form.total_dose_cgy %}
+          {% include "calculators/_field.html" with field=form.fx_per_day %}
+          {% include "calculators/_field.html" with field=form.fx_per_week %}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Schedule</legend>
+        <div class="fields">
+          {% include "calculators/_field.html" with field=form.start_date %}
+          {% include "calculators/_field.html" with field=form.original_end_date %}
+          {% include "calculators/_field.html" with field=form.last_tx_before_break %}
+          {% include "calculators/_field.html" with field=form.first_tx_after_break %}
+          {% include "calculators/_field.html" with field=form.proposed_finish_date %}
+          {% include "calculators/_field.html" with field=form.fx_treated_before_break %}
+        </div>
+      </fieldset>
+
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Calculate</button>
+        <a class="btn btn-secondary" href="{% url 'tdf' %}">Reset</a>
+        {% if result %}<button class="btn btn-secondary" type="button" onclick="window.print()">Print</button>{% endif %}
+      </div>
+    </div>
+  </form>
+
+  <div>
+    {% if result %}
+    <div class="card">
+      <div class="card-head"><h2>Result</h2></div>
+      <div class="card-body">
+        {% if result.warnings %}
+        <div class="alert alert-warn"><strong>Check:</strong><ul>{% for w in result.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>
+        {% endif %}
+        <div class="result-hero">
+          <div class="stat primary">
+            <div class="k">Fractions to add</div>
+            <div class="v">{{ result.fractions_to_add|floatformat:2 }}</div>
+            <div class="u">≈ {{ result.fractions_to_add_rounded }} fx at {{ form.dose_per_fx_cgy.value }} cGy</div>
+          </div>
+          <div class="stat">
+            <div class="k">Fractions after break</div>
+            <div class="v">{{ result.fx_required_after_break|floatformat:2 }}</div>
+            <div class="u">vs {{ result.fx_remaining_planned|floatformat:0 }} originally remaining</div>
+          </div>
+          <div class="stat">
+            <div class="k">TDF recovered</div>
+            <div class="v">{{ result.tdf_percent_recovered|floatformat:1 }}<span class="u">%</span></div>
+            <div class="u">of prescribed TDF after rest</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>TDF values</h2></div>
+      <div class="card-body">
+        <table class="data">
+          <thead><tr><th>Quantity</th><th>Definition</th><th class="num">Value</th></tr></thead>
+          <tbody>
+            <tr><td><strong>TDF<sub>total</sub></strong></td><td class="label">Prescribed, {{ result.total_fx|floatformat:0 }} fx over {{ result.original_elapsed_days }} days</td><td class="num">{{ result.tdf_total|floatformat:2 }}</td></tr>
+            <tr><td><strong>TDF<sub>1</sub></strong></td><td class="label">Delivered before break, {{ form.fx_treated_before_break.value }} fx over {{ result.initial_phase_days }} days</td><td class="num">{{ result.tdf1|floatformat:2 }}</td></tr>
+            <tr><td><strong>TDF<sub>ARP</sub></strong></td><td class="label">TDF<sub>1</sub> after a {{ result.rest_days }}-day rest period (decay)</td><td class="num">{{ result.tdf_arp|floatformat:2 }}</td></tr>
+            <tr class="total"><td><strong>TDF<sub>2</sub></strong></td><td class="label">Still required = TDF<sub>total</sub> − TDF<sub>ARP</sub></td><td class="num">{{ result.tdf2|floatformat:2 }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Schedule summary</h2></div>
+      <div class="card-body">
+        <table class="data">
+          <tbody>
+            <tr><td class="label">Original course</td><td class="num">{{ result.original_elapsed_days }} days</td></tr>
+            <tr><td class="label">Initial phase (start → last tx before break)</td><td class="num">{{ result.initial_phase_days }} days</td></tr>
+            <tr><td class="label">Rest period</td><td class="num">{{ result.rest_days }} days</td></tr>
+            <tr><td class="label">Post-break phase (resume → proposed finish)</td><td class="num">{{ result.post_break_days }} days</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% else %}
+    <div class="card">
+      <div class="card-body empty">
+        <strong>No calculation yet</strong>
+        Complete the form and select Calculate.
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card no-print">
+      <div class="card-head"><h2>Model</h2></div>
+      <div class="card-body">
+        <div class="formula">TDF = N · d<sup>1.538</sup> · (T / N)<sup>−0.169</sup> · 10<sup>−3</sup></div>
+        <p class="formula-note">d = dose per fraction (cGy), N = number of fractions, T = elapsed days.</p>
+        <div class="formula">TDF<sub>ARP</sub> = TDF<sub>1</sub> · (T<sub>1</sub> / (T<sub>1</sub> + R))<sup>0.11</sup></div>
+        <p class="formula-note">T<sub>1</sub> = days from first fraction to start of rest, R = rest period (days).</p>
+        <div class="formula">N<sub>2</sub> = (10<sup>3</sup> · TDF<sub>2</sub> · T<sub>2</sub><sup>0.169</sup> / d<sup>1.538</sup>)<sup>1/1.169</sup>;&nbsp; fractions to add = N<sub>2</sub> − (N − N<sub>1</sub>)</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

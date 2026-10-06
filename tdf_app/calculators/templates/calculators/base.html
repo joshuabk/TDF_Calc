@@ -1,0 +1,43 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Treatment Interruption Calculator{% endblock %} · Northside Hospital Radiation Oncology</title>
+  <link rel="stylesheet" href="{% static 'calculators/app.css' %}">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="{% url 'home' %}">
+      <div class="brand-mark">RO</div>
+      <div>
+        <div class="brand-title">Treatment Interruption Calculator</div>
+        <div class="brand-sub">Northside Hospital · Radiation Oncology Physics</div>
+      </div>
+    </a>
+    <nav class="nav">
+      <a href="{% url 'tdf' %}" class="{% if active == 'tdf' %}active{% endif %}">TDF</a>
+      <a href="{% url 'bed' %}" class="{% if active == 'bed' %}active{% endif %}">BED / LQ</a>
+      <a href="{% url 'reference' %}" class="{% if active == 'reference' %}active{% endif %}">α/β Reference</a>
+      <a href="{% url 'rule_of_thumb' %}" class="{% if active == 'rule' %}active{% endif %}">Rule of Thumb</a>
+    </nav>
+  </div>
+</header>
+
+<main class="page">
+  <div class="print-meta">Northside Hospital Radiation Oncology — Treatment Interruption Calculator — printed <span id="print-date"></span></div>
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="footer">
+  For use by qualified medical physicists and radiation oncologists. Results are decision support only and must be
+  reviewed and approved by the attending radiation oncologist. Formulas reproduce the departmental Treatment
+  Interruption Worksheet (TDF: Orton &amp; Ellis; BED: linear-quadratic model with repopulation).
+</footer>
+<script>
+  document.getElementById('print-date').textContent = new Date().toLocaleString();
+  {% block script %}{% endblock %}
+</script>
+</body>
+</html>

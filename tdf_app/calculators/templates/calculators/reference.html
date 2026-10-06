@@ -1,0 +1,34 @@
+{% extends "calculators/base.html" %}
+{% block title %}α/β Reference{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>α/β Reference Parameters</h1>
+  <p>Linear-quadratic model parameters used by the BED calculator and tissue tolerance data.</p>
+</div>
+<div class="card">
+  <div class="card-head"><h2>Model parameters</h2><span class="hint">K = daily BED-equivalent of repopulation (Gy/day); Tk = time lag before rapid repopulation (days)</span></div>
+  <div class="card-body">
+    <table class="data">
+      <thead><tr><th>Tissue class</th><th class="num">α/β (Gy)</th><th class="num">K (Gy/day)</th><th class="num">Tk (days)</th></tr></thead>
+      <tbody>
+      {% for r in model_parameters %}
+        <tr><td>{{ r.group }}</td><td class="num">{{ r.alpha_beta }}</td><td class="num">{{ r.k }}</td><td class="num">{{ r.tk }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="card">
+  <div class="card-head"><h2>Normal tissue tolerance</h2><span class="hint">Dose is total dose at conventional fractionation producing the stated risk</span></div>
+  <div class="card-body">
+    <table class="data">
+      <thead><tr><th>Tissue</th><th>End point</th><th class="num">Risk (%)</th><th class="num">Dose (Gy)</th><th class="num">α/β (Gy)</th></tr></thead>
+      <tbody>
+      {% for t in tolerance %}
+        <tr><td>{{ t.0 }}</td><td>{{ t.1 }}</td><td class="num">{{ t.2 }}</td><td class="num">{{ t.3 }}</td><td class="num">{{ t.4 }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

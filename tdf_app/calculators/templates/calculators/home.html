@@ -1,0 +1,34 @@
+{% extends "calculators/base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Treatment Interruption Calculator</h1>
+  <p>Radiobiological compensation for missed or interrupted radiation treatments. Choose a model below. No patient
+     information is stored; print or save each evaluation to the patient record.</p>
+</div>
+<div class="tiles">
+  <a class="tile" href="{% url 'tdf' %}">
+    <span class="tag">Calculator</span>
+    <h3>TDF — Fractions to Add</h3>
+    <p>Time-Dose-Fractionation (Orton &amp; Ellis). Computes the TDF lost during a rest period and the number of
+       extra fractions needed at the same dose per fraction to recover the prescribed TDF.</p>
+  </a>
+  <a class="tile" href="{% url 'bed' %}">
+    <span class="tag">Calculator</span>
+    <h3>BED — Linear-Quadratic Model</h3>
+    <p>Biologically Effective Dose with tumor repopulation. Compares a proposed post-gap schedule to the original
+       prescription for tumor, early- and late-responding normal tissue.</p>
+  </a>
+  <a class="tile" href="{% url 'reference' %}">
+    <span class="tag">Reference</span>
+    <h3>α/β, K and Tk Parameters</h3>
+    <p>Model parameters for slow and rapidly growing tumors and normal tissues, plus a tissue tolerance table with
+       endpoints, risk and α/β ranges.</p>
+  </a>
+  <a class="tile" href="{% url 'rule_of_thumb' %}">
+    <span class="tag">Reference</span>
+    <h3>Quick Rule of Thumb</h3>
+    <p>Fast estimate of dose to add per missed fraction when a full model evaluation is not required.</p>
+  </a>
+</div>
+{% endblock %}

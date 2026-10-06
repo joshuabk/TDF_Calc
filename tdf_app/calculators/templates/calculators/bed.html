@@ -1,0 +1,185 @@
+{% extends "calculators/base.html" %}
+{% block title %}BED Calculator{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>BED — Linear-Quadratic Gap Compensation</h1>
+  <p>Compares the biologically effective dose of the original prescription against a proposed schedule with a
+     treatment gap, for tumor and for early- and late-responding normal tissue. Dose in Gy.</p>
+</div>
+
+<div class="grid">
+  <form method="post" class="card" novalidate id="bed-form">
+    {% csrf_token %}
+    <div class="card-head"><h2>Inputs</h2><span class="hint">Dose in Gy</span></div>
+    <div class="card-body">
+      {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+      {% if error %}<div class="form-errors">{{ error }}</div>{% endif %}
+
+      <fieldset>
+        <legend>Original prescription</legend>
+        <div class="fields">
+          {% include "calculators/_field.html" with field=form.rx_dose_per_fx_gy %}
+          {% include "calculators/_field.html" with field=form.rx_total_dose_gy %}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Dates</legend>
+        <div class="fields">
+          {% include "calculators/_field.html" with field=form.first_tx %}
+          {% include "calculators/_field.html" with field=form.planned_last_tx %}
+          {% include "calculators/_field.html" with field=form.last_tx_before_gap %}
+          {% include "calculators/_field.html" with field=form.first_tx_after_gap %}
+          {% include "calculators/_field.html" with field=form.proposed_final_tx %}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Delivered before gap</legend>
+        <div class="fields">
+          {% include "calculators/_field.html" with field=form.pre_dose_per_fx_gy %}
+          {% include "calculators/_field.html" with field=form.pre_fx %}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Proposed after gap</legend>
+        <div class="fields">
+          {% include "calculators/_field.html" with field=form.post_dose_per_fx_gy %}
+          {% include "calculators/_field.html" with field=form.post_fx %}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Tissue parameters</legend>
+        <div class="fields" style="margin-bottom:10px">
+          <div class="field full">
+            <label for="tumor-preset">Tumor preset</label>
+            <select id="tumor-preset" class="no-print">
+              <option value="">— apply a preset —</option>
+              {% for p in presets.tumor %}<option value="{{ p.alpha_beta }}|{{ p.k }}|{{ p.tk }}">{{ p.label }} (α/β {{ p.alpha_beta }}, K {{ p.k }}, Tk {{ p.tk }})</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <table class="data">
+          <thead><tr><th>Tissue</th><th>α/β (Gy)</th><th>K (Gy/day)</th><th>Tk (days)</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Tumor</strong></td><td>{{ form.tumor_alpha_beta }}</td><td>{{ form.tumor_k }}</td><td>{{ form.tumor_tk }}</td></tr>
+            <tr><td><strong>Early-responding</strong></td><td>{{ form.early_alpha_beta }}</td><td>{{ form.early_k }}</td><td>{{ form.early_tk }}</td></tr>
+            <tr><td><strong>Late-responding</strong></td><td>{{ form.late_alpha_beta }}</td><td>{{ form.late_k }}</td><td>{{ form.late_tk }}</td></tr>
+          </tbody>
+        </table>
+        {% for f in form.param_errors %}<span class="err" style="color:var(--bad);font-size:12.5px;display:block">{{ f.0 }}: {{ f.1 }}</span>{% endfor %}
+      </fieldset>
+
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Calculate</button>
+        <a class="btn btn-secondary" href="{% url 'bed' %}">Reset</a>
+        {% if result %}<button class="btn btn-secondary" type="button" onclick="window.print()">Print</button>{% endif %}
+      </div>
+    </div>
+  </form>
+
+  <div>
+    {% if result %}
+    <div class="card">
+      <div class="card-head"><h2>Result</h2></div>
+      <div class="card-body">
+        {% if result.warnings %}
+        <div class="alert alert-warn"><strong>Check:</strong><ul>{% for w in result.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>
+        {% endif %}
+        <div class="result-hero">
+          <div class="stat primary">
+            <div class="k">Tumor BED</div>
+            <div class="v">{{ result.tumor.percent_of_rx|floatformat:1 }}<span class="u">%</span></div>
+            <div class="u">of prescription ({{ result.tumor.total|floatformat:1 }} / {{ result.tumor.prescribed|floatformat:1 }} Gy)</div>
+          </div>
+          <div class="stat">
+            <div class="k">Early normal tissue</div>
+            <div class="v">{{ result.early.percent_of_rx|floatformat:1 }}<span class="u">%</span></div>
+            <div class="u">{{ result.early.total|floatformat:1 }} / {{ result.early.prescribed|floatformat:1 }} Gy</div>
+          </div>
+          <div class="stat">
+            <div class="k">Late normal tissue</div>
+            <div class="v">{{ result.late.percent_of_rx|floatformat:1 }}<span class="u">%</span></div>
+            <div class="u">{{ result.late.total|floatformat:1 }} / {{ result.late.prescribed|floatformat:1 }} Gy</div>
+          </div>
+        </div>
+        <p class="summary-text" style="margin:16px 0 0">{{ result.summary }}</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>BED by tissue</h2><span class="hint">Gy</span></div>
+      <div class="card-body">
+        <table class="data">
+          <thead>
+            <tr><th>Tissue</th><th class="num">Prescribed</th><th class="num">Before gap</th><th class="num">After gap</th><th class="num">Total</th><th class="num">% of Rx</th></tr>
+          </thead>
+          <tbody>
+            {% for t in result.tissues %}
+            <tr{% if forloop.first %} class="total"{% endif %}>
+              <td style="min-width:150px"><strong>{{ t.name }}</strong><br><span class="label" style="font-size:12px;color:var(--muted)">α/β {{ t.alpha_beta }} · K {{ t.k }} · Tk {{ t.tk|floatformat:0 }}</span></td>
+              <td class="num">{{ t.prescribed|floatformat:2 }}</td>
+              <td class="num">{{ t.before_gap_at_resume|floatformat:2 }}</td>
+              <td class="num">{{ t.after_gap|floatformat:2 }}</td>
+              <td class="num">{{ t.total|floatformat:2 }}</td>
+              <td class="num">
+                {% if t.percent_of_rx >= 95 and t.percent_of_rx <= 105 %}<span class="badge badge-ok">{{ t.percent_of_rx|floatformat:1 }}%</span>
+                {% elif t.percent_of_rx > 105 %}<span class="badge badge-bad">{{ t.percent_of_rx|floatformat:1 }}%</span>
+                {% else %}<span class="badge badge-warn">{{ t.percent_of_rx|floatformat:1 }}%</span>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="formula-note">"Before gap" is the pre-gap BED evaluated at the date of resumption, i.e. including repopulation during the gap
+           (worksheet column "After Gap" row "Before Gap"). BED at the last pre-gap treatment date: tumor {{ result.tumor.before_gap|floatformat:2 }},
+           early {{ result.early.before_gap|floatformat:2 }}, late {{ result.late.before_gap|floatformat:2 }} Gy.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Schedule summary</h2></div>
+      <div class="card-body">
+        <table class="data">
+          <tbody>
+            <tr><td class="label">Prescription</td><td class="num">{{ result.rx_fx|floatformat:0 }} fx · {{ form.rx_total_dose_gy.value }} Gy over {{ result.rx_calendar_days }} days</td></tr>
+            <tr><td class="label">Delivered before gap</td><td class="num">{{ form.pre_fx.value }} fx · {{ result.pre_total_dose|floatformat:-2 }} Gy over {{ result.pre_calendar_days }} days</td></tr>
+            <tr><td class="label">Gap</td><td class="num">{{ result.gap_days }} days</td></tr>
+            <tr><td class="label">Proposed after gap</td><td class="num">{{ form.post_fx.value }} fx · {{ result.post_total_dose|floatformat:-2 }} Gy over {{ result.post_calendar_days }} days</td></tr>
+            <tr class="total"><td class="label">Total</td><td class="num">{{ result.total_dose|floatformat:-2 }} Gy · first to last treatment {{ result.total_days }} days</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% else %}
+    <div class="card">
+      <div class="card-body empty">
+        <strong>No calculation yet</strong>
+        Complete the form and select Calculate.
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card no-print">
+      <div class="card-head"><h2>Model</h2></div>
+      <div class="card-body">
+        <div class="formula">BED<sub>normal</sub> = N · d · (1 + d / (α/β)) − K · T</div>
+        <p class="formula-note">Eq. (A): N = number of well-spaced fractions, d = dose per fraction (Gy).</p>
+        <div class="formula">BED<sub>tumor</sub> = N · d · (1 + d / (α/β)) − K · (T − T<sub>k</sub>)&nbsp;&nbsp; for T ≥ T<sub>k</sub></div>
+        <p class="formula-note">Eq. (B): T = overall treatment time, T<sub>k</sub> = lag before rapid repopulation, K = daily BED-equivalent of repopulation.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+  document.getElementById('tumor-preset').addEventListener('change', function () {
+    if (!this.value) return;
+    var p = this.value.split('|');
+    document.getElementById('id_tumor_alpha_beta').value = p[0];
+    document.getElementById('id_tumor_k').value = p[1];
+    document.getElementById('id_tumor_tk').value = p[2];
+  });
+{% endblock %}

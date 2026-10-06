@@ -1,0 +1,24 @@
+{% extends "calculators/base.html" %}
+{% block title %}Quick Rule of Thumb{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Quick Rule of Thumb</h1>
+  <p>Approximate additional dose per missed fraction. Use the BED calculator for a formal evaluation that equates late effects.</p>
+</div>
+<div class="card">
+  <div class="card-head"><h2>Dose to add per missed fraction</h2></div>
+  <div class="card-body">
+    <table class="data">
+      <thead><tr><th></th>{% for c in rule.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for row in rule.rows %}
+        <tr><td><strong>{{ row.0 }}</strong></td>{% for v in row.1 %}<td>{{ v }}</td>{% endfor %}</tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="alert alert-warn" style="margin-top:16px">
+      <ul style="margin-left:18px">{% for n in rule.notes %}<li>{{ n }}</li>{% endfor %}</ul>
+    </div>
+  </div>
+</div>
+{% endblock %}
