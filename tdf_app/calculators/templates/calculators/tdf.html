@@ -4,14 +4,14 @@
 <div class="page-head">
   <h1>TDF — Fractions to Add After a Treatment Break</h1>
   <p>Time-Dose-Fractionation model (Orton &amp; Ellis). Enter the original prescription, the treatment delivered
-     before the break, and the proposed resumption schedule. The calculator returns the number of fractions to add
-     at the same dose per fraction to recover the prescribed TDF.</p>
+     before the break, and the date treatment resumes. The calculator returns the number of fractions to add at the
+     same dose per fraction to recover the prescribed TDF, and the finish date that schedule lands on.</p>
 </div>
 
 <div class="grid">
   <form method="post" class="card" novalidate>
     {% csrf_token %}
-    <div class="card-head"><h2>Inputs</h2><span class="hint">Dose in cGy</span></div>
+    <div class="card-head"><h2>Inputs</h2><span class="hint">Dose in Gy</span></div>
     <div class="card-body">
       {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
       {% if error %}<div class="form-errors">{{ error }}</div>{% endif %}
@@ -19,8 +19,8 @@
       <fieldset>
         <legend>Initial prescription</legend>
         <div class="fields">
-          {% include "calculators/_field.html" with field=form.dose_per_fx_cgy %}
-          {% include "calculators/_field.html" with field=form.total_dose_cgy %}
+          {% include "calculators/_field.html" with field=form.dose_per_fx_gy %}
+          {% include "calculators/_field.html" with field=form.total_dose_gy %}
           {% include "calculators/_field.html" with field=form.fx_per_day %}
           {% include "calculators/_field.html" with field=form.fx_per_week %}
         </div>
@@ -33,7 +33,6 @@
           {% include "calculators/_field.html" with field=form.original_end_date %}
           {% include "calculators/_field.html" with field=form.last_tx_before_break %}
           {% include "calculators/_field.html" with field=form.first_tx_after_break %}
-          {% include "calculators/_field.html" with field=form.proposed_finish_date %}
           {% include "calculators/_field.html" with field=form.fx_treated_before_break %}
         </div>
       </fieldset>
@@ -58,7 +57,7 @@
           <div class="stat primary">
             <div class="k">Fractions to add</div>
             <div class="v">{{ result.fractions_to_add|floatformat:2 }}</div>
-            <div class="u">≈ {{ result.fractions_to_add_rounded }} fx at {{ form.dose_per_fx_cgy.value }} cGy</div>
+            <div class="u">≈ {{ result.fractions_to_add_rounded }} fx at {{ form.dose_per_fx_gy.value }} Gy</div>
           </div>
           <div class="stat">
             <div class="k">Fractions after break</div>
@@ -66,11 +65,13 @@
             <div class="u">vs {{ result.fx_remaining_planned|floatformat:0 }} originally remaining</div>
           </div>
           <div class="stat">
-            <div class="k">TDF recovered</div>
-            <div class="v">{{ result.tdf_percent_recovered|floatformat:1 }}<span class="u">%</span></div>
-            <div class="u">of prescribed TDF after rest</div>
+            <div class="k">Finish date</div>
+            <div class="v" style="font-size:22px">{{ result.proposed_finish_date|date:"n/j/Y" }}</div>
+            <div class="u">{{ result.post_fx_whole }} post-break fx · {{ result.post_break_days }} calendar days after resumption</div>
           </div>
         </div>
+        <p class="formula-note" style="margin:12px 0 0">TDF recovered after the rest period: {{ result.tdf_percent_recovered|floatformat:1 }}% of the prescribed TDF.
+          The finish date is the date of the last post-break fraction for the whole number of fractions the TDF equation calls for over that same span.</p>
       </div>
     </div>
 
@@ -81,7 +82,7 @@
           <thead><tr><th>Quantity</th><th>Definition</th><th class="num">Value</th></tr></thead>
           <tbody>
             <tr><td><strong>TDF<sub>total</sub></strong></td><td class="label">Prescribed, {{ result.total_fx|floatformat:0 }} fx over {{ result.original_elapsed_days }} days</td><td class="num">{{ result.tdf_total|floatformat:2 }}</td></tr>
-            <tr><td><strong>TDF<sub>1</sub></strong></td><td class="label">Delivered before break, {{ form.fx_treated_before_break.value }} fx over {{ result.initial_phase_days }} days</td><td class="num">{{ result.tdf1|floatformat:2 }}</td></tr>
+            <tr><td><strong>TDF<sub>1</sub></strong></td><td class="label">Delivered before break, {{ result.fx_treated_before_break }} fx over {{ result.initial_phase_days }} days{% if result.fx_treated_from_calendar %} (counted from calendar){% endif %}</td><td class="num">{{ result.tdf1|floatformat:2 }}</td></tr>
             <tr><td><strong>TDF<sub>ARP</sub></strong></td><td class="label">TDF<sub>1</sub> after a {{ result.rest_days }}-day rest period (decay)</td><td class="num">{{ result.tdf_arp|floatformat:2 }}</td></tr>
             <tr class="total"><td><strong>TDF<sub>2</sub></strong></td><td class="label">Still required = TDF<sub>total</sub> − TDF<sub>ARP</sub></td><td class="num">{{ result.tdf2|floatformat:2 }}</td></tr>
           </tbody>
@@ -94,10 +95,10 @@
       <div class="card-body">
         <table class="data">
           <tbody>
-            <tr><td class="label">Original course</td><td class="num">{{ result.original_elapsed_days }} days</td></tr>
+            <tr><td class="label">Original course (start → {{ result.original_end_date|date:"n/j/Y" }})</td><td class="num">{{ result.original_elapsed_days }} days</td></tr>
             <tr><td class="label">Initial phase (start → last tx before break)</td><td class="num">{{ result.initial_phase_days }} days</td></tr>
             <tr><td class="label">Rest period</td><td class="num">{{ result.rest_days }} days</td></tr>
-            <tr><td class="label">Post-break phase (resume → proposed finish)</td><td class="num">{{ result.post_break_days }} days</td></tr>
+            <tr><td class="label">Post-break phase (resume → {{ result.proposed_finish_date|date:"n/j/Y" }})</td><td class="num">{{ result.post_break_days }} days</td></tr>
           </tbody>
         </table>
       </div>
@@ -115,7 +116,7 @@
       <div class="card-head"><h2>Model</h2></div>
       <div class="card-body">
         <div class="formula">TDF = N · d<sup>1.538</sup> · (T / N)<sup>−0.169</sup> · 10<sup>−3</sup></div>
-        <p class="formula-note">d = dose per fraction (cGy), N = number of fractions, T = elapsed days.</p>
+        <p class="formula-note">d = dose per fraction in cGy (doses are entered in Gy and converted), N = number of fractions, T = elapsed days.</p>
         <div class="formula">TDF<sub>ARP</sub> = TDF<sub>1</sub> · (T<sub>1</sub> / (T<sub>1</sub> + R))<sup>0.11</sup></div>
         <p class="formula-note">T<sub>1</sub> = days from first fraction to start of rest, R = rest period (days).</p>
         <div class="formula">N<sub>2</sub> = (10<sup>3</sup> · TDF<sub>2</sub> · T<sub>2</sub><sup>0.169</sup> / d<sup>1.538</sup>)<sup>1/1.169</sup>;&nbsp; fractions to add = N<sub>2</sub> − (N − N<sub>1</sub>)</p>
@@ -123,4 +124,30 @@
     </div>
   </div>
 </div>
+{% endblock %}
+{% block script %}
+  (function () {
+    // Original planned end = last prescribed fraction at fx/week and fx/day from the start date.
+    var start = document.getElementById('id_start_date');
+    var dose = document.getElementById('id_dose_per_fx_gy');
+    var total = document.getElementById('id_total_dose_gy');
+    var perWeek = document.getElementById('id_fx_per_week');
+    var perDay = document.getElementById('id_fx_per_day');
+    var end = document.getElementById('id_original_end_date');
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    function treatmentDay(d, fpw) { return fpw >= 7 ? true : ((d.getDay() + 6) % 7) < Math.max(1, fpw); }
+    function fill() {
+      var n = parseFloat(total.value) / parseFloat(dose.value);
+      var fpw = parseInt(perWeek.value, 10) || 5, fpd = Math.max(1, parseInt(perDay.value, 10) || 1);
+      if (!start.value || !isFinite(n) || n < 1 || Math.abs(n - Math.round(n)) > 1e-9) { end.value = ''; return; }
+      var days = Math.ceil(Math.round(n) / fpd);
+      var p = start.value.split('-');
+      var d = new Date(p[0], p[1] - 1, p[2]);
+      var day = 1;
+      while (day < days) { d.setDate(d.getDate() + 1); if (treatmentDay(d, fpw)) day += 1; }
+      end.value = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    }
+    [start, dose, total, perWeek, perDay].forEach(function (el) { el.addEventListener('input', fill); el.addEventListener('change', fill); });
+    fill();
+  })();
 {% endblock %}

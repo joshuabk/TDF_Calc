@@ -15,7 +15,10 @@ def tdf_view(request):
         form = TDFForm(request.POST)
         if form.is_valid():
             try:
-                result = engine.calculate_tdf(engine.TDFInput(**form.cleaned_data))
+                d = dict(form.cleaned_data)
+                d["dose_per_fx_cgy"] = d.pop("dose_per_fx_gy") * 100.0     # formula works in cGy
+                d["total_dose_cgy"] = d.pop("total_dose_gy") * 100.0
+                result = engine.calculate_tdf(engine.TDFInput(**d))
             except (ValueError, ZeroDivisionError, OverflowError) as exc:
                 error = str(exc)
     else:
@@ -27,29 +30,40 @@ def tdf_view(request):
 def bed_view(request):
     result = None
     error = None
+    scenarios = None
+    selected_key = None
     if request.method == "POST":
         form = BEDForm(request.POST)
         if form.is_valid():
             d = form.cleaned_data
-            inp = engine.BEDInput(
+            strategy, fx_per_day = BEDForm.parse_mode(d["mode"])
+            inp = engine.BEDMakeupInput(
                 rx_dose_per_fx_gy=d["rx_dose_per_fx_gy"], rx_total_dose_gy=d["rx_total_dose_gy"],
                 first_tx=d["first_tx"], planned_last_tx=d["planned_last_tx"],
                 last_tx_before_gap=d["last_tx_before_gap"], first_tx_after_gap=d["first_tx_after_gap"],
-                proposed_final_tx=d["proposed_final_tx"],
-                pre_dose_per_fx_gy=d["pre_dose_per_fx_gy"], pre_fx=d["pre_fx"],
-                post_dose_per_fx_gy=d["post_dose_per_fx_gy"], post_fx=d["post_fx"],
+                pre_fx=d["pre_fx"],
+                post_dose_per_fx_gy=d["rx_dose_per_fx_gy"],      # add-fractions keeps the Rx dose/fx
+                fx_per_week=engine.DEFAULT_FX_PER_WEEK, fx_per_day=fx_per_day,
                 tumor=engine.TissueParams(d["tumor_alpha_beta"], d["tumor_k"], d["tumor_tk"]),
                 early=engine.TissueParams(d["early_alpha_beta"], d["early_k"], d["early_tk"]),
                 late=engine.TissueParams(d["late_alpha_beta"], d["late_k"], d["late_tk"]),
             )
             try:
-                result = engine.calculate_bed(inp)
+                if strategy == "dose":
+                    result = engine.calculate_bed_dose_makeup(inp)
+                else:
+                    result = engine.calculate_bed_makeup(inp)
+                scenarios = engine.compare_schedules(inp)
+                selected_key = d["mode"]
             except (ValueError, ZeroDivisionError, OverflowError) as exc:
                 error = str(exc)
     else:
         form = BEDForm()
     return render(request, "calculators/bed.html", {
         "form": form, "result": result, "error": error, "active": "bed",
+        "mode": BEDForm.parse_mode(form["mode"].value())[0],
+        "bid": BEDForm.parse_mode(form["mode"].value())[1] == 2,
+        "scenarios": scenarios, "selected_key": selected_key,
         "presets": engine.TISSUE_PRESETS,
     })
 

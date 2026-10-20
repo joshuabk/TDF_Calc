@@ -27,36 +27,48 @@ def _date(label, help_text=""):
 
 class TDFForm(forms.Form):
     # Initial prescription
-    dose_per_fx_cgy = _num("Dose per fraction (cGy)", 200, step="1")
-    total_dose_cgy = _num("Total dose (cGy)", 6000, step="1")
+    # Entered in Gy; the TDF formula itself takes cGy, so the view converts.
+    dose_per_fx_gy = _num("Dose per fraction (Gy)", 2, step="0.01")
+    total_dose_gy = _num("Total dose (Gy)", 60, step="0.01")
     fx_per_day = _int("Fractions per day", 1, min_value=1)
     fx_per_week = _int("Fractions per week", 5, min_value=1)
 
-    # Dates
+    # Dates.  The planned end date is derived (last prescribed fraction) and the
+    # finish date is solved for, so neither is typed.
     start_date = _date("Start date (first fraction)")
-    original_end_date = _date("Original planned end date")
+    original_end_date = forms.DateField(
+        label="Original planned end date", required=False,
+        help_text="Filled in automatically: the last prescribed fraction at the fractions per week / day above.",
+        widget=DateInput(attrs={"readonly": "readonly", "tabindex": "-1"}))
     last_tx_before_break = _date("Date of last treatment before break")
     first_tx_after_break = _date("Date of first treatment after break")
-    proposed_finish_date = _date("Proposed finish date")
 
-    # Treatment before break
-    fx_treated_before_break = _int("Fractions treated before break", min_value=1)
+    # Treatment before break: counted from the calendar unless overridden
+    fx_treated_before_break = _int("Fractions treated before break (optional)", None, min_value=1, required=False,
+                                   help_text="Leave blank to count treatment days from the start date through the "
+                                             "last treatment before the break. Enter it if days were missed.")
 
     def clean(self):
         c = super().clean()
-        needed = ["start_date", "original_end_date", "last_tx_before_break",
-                  "first_tx_after_break", "proposed_finish_date"]
+        from .engine import nth_treatment_date
+        c["original_end_date"] = None
+        if c.get("dose_per_fx_gy") and c.get("total_dose_gy") and c.get("start_date") \
+                and c.get("fx_per_week") and c.get("fx_per_day"):
+            total_fx = c["total_dose_gy"] / c["dose_per_fx_gy"]
+            if abs(total_fx - round(total_fx)) < 1e-9 and round(total_fx) >= 1:
+                c["original_end_date"] = nth_treatment_date(
+                    c["start_date"], int(round(total_fx)), c["fx_per_week"], c["fx_per_day"])
+            else:
+                self.add_error("total_dose_gy",
+                               f"Total dose / dose per fraction = {total_fx:.2f}; must be a whole number of fractions.")
+        needed = ["start_date", "last_tx_before_break", "first_tx_after_break"]
         if all(c.get(k) for k in needed):
-            if c["original_end_date"] <= c["start_date"]:
-                self.add_error("original_end_date", "Must be after the start date.")
             if c["last_tx_before_break"] <= c["start_date"]:
                 self.add_error("last_tx_before_break", "Must be after the start date.")
             if c["first_tx_after_break"] <= c["last_tx_before_break"]:
                 self.add_error("first_tx_after_break", "Must be after the last treatment before the break.")
-            if c["proposed_finish_date"] <= c["first_tx_after_break"]:
-                self.add_error("proposed_finish_date", "Must be after the first treatment after the break.")
-        if c.get("dose_per_fx_cgy") and c.get("total_dose_cgy") and c.get("fx_treated_before_break"):
-            total_fx = c["total_dose_cgy"] / c["dose_per_fx_cgy"]
+        if c.get("dose_per_fx_gy") and c.get("total_dose_gy") and c.get("fx_treated_before_break") is not None:
+            total_fx = c["total_dose_gy"] / c["dose_per_fx_gy"]
             if c["fx_treated_before_break"] >= total_fx:
                 self.add_error("fx_treated_before_break",
                                f"Must be fewer than the total fraction count ({total_fx:g}).")
@@ -64,24 +76,38 @@ class TDFForm(forms.Form):
 
 
 class BEDForm(forms.Form):
+    # value = "<strategy>-<fx per day>"; parsed by strategy() / fx_per_day()
+    MODE_CHOICES = [
+        ("fractions-1", "Add fractions — keep the dose per fraction, extend the course"),
+        ("dose-1", "Increase dose per fraction — keep the remaining fractions, no extra treatment days"),
+        ("dose-2", "BID — keep the remaining fractions, 2 fx/day (≥ 6 h apart), dose per fraction solved"),
+    ]
+    mode = forms.ChoiceField(label="Calculation", choices=MODE_CHOICES, initial="fractions-1")
+
+    @staticmethod
+    def parse_mode(value):
+        """'fractions-2' -> ('fractions', 2)."""
+        strategy, _, per_day = (value or "fractions-1").partition("-")
+        return strategy, int(per_day or 1)
+
     # Original prescription
     rx_dose_per_fx_gy = _num("Dose per fraction (Gy)", 2, step="0.01")
     rx_total_dose_gy = _num("Total dose (Gy)", 50, step="0.01")
 
     # Dates
     first_tx = _date("Date of first treatment")
-    planned_last_tx = _date("Date of last treatment (as prescribed)")
+    planned_last_tx = forms.DateField(
+        label="Date of last treatment (as prescribed)", required=False,
+        help_text="Filled in automatically: the prescribed number of fractions, Mon–Fri, from the first treatment.",
+        widget=DateInput(attrs={"readonly": "readonly", "tabindex": "-1"}))
     last_tx_before_gap = _date("Date of last treatment before gap")
     first_tx_after_gap = _date("Date of first treatment after gap")
-    proposed_final_tx = _date("Proposed final day of treatment")
 
-    # Pre-gap delivered
-    pre_dose_per_fx_gy = _num("Dose per fraction (Gy)", 2, step="0.01")
-    pre_fx = _int("Fractions delivered", 20, min_value=1)
-
-    # Post-gap proposed
-    post_dose_per_fx_gy = _num("Dose per fraction (Gy)", 2, step="0.01")
-    post_fx = _int("Fractions proposed", 5, min_value=0)
+    # Pre-gap delivered: counted from the calendar unless overridden
+    pre_fx = _int("Fractions delivered before gap (optional)", None, min_value=1, required=False,
+                  help_text="Leave blank to count treatment days from the first treatment through the "
+                            "last treatment before the gap. Enter it if days were missed (holidays, "
+                            "machine down).")
 
     # Tissue parameters
     tumor_alpha_beta = _num("α/β (Gy)", DEFAULT_TUMOR.alpha_beta, step="0.1", min_value=0.1)
@@ -109,15 +135,29 @@ class BEDForm(forms.Form):
 
     def clean(self):
         c = super().clean()
-        needed = ["first_tx", "planned_last_tx", "last_tx_before_gap",
-                  "first_tx_after_gap", "proposed_final_tx"]
+        from .engine import DEFAULT_FX_PER_WEEK, nth_treatment_date
+        needed = ["first_tx", "last_tx_before_gap", "first_tx_after_gap"]
+        for k in needed:
+            if c.get(k) and c[k].weekday() >= 5:
+                self.add_error(k, f"{c[k]:%A} — patients are not treated on weekends. Enter a weekday.")
+        # The planned last treatment is derived, never typed: the prescribed
+        # number of fractions, Mon-Fri, counted from the first treatment.
+        c["planned_last_tx"] = None
+        if c.get("rx_dose_per_fx_gy") and c.get("rx_total_dose_gy") and c.get("first_tx"):
+            rx_fx = c["rx_total_dose_gy"] / c["rx_dose_per_fx_gy"]
+            if abs(rx_fx - round(rx_fx)) < 1e-9 and round(rx_fx) >= 1:
+                c["planned_last_tx"] = nth_treatment_date(c["first_tx"], int(round(rx_fx)), DEFAULT_FX_PER_WEEK)
+            else:
+                self.add_error("rx_total_dose_gy",
+                               f"Total dose / dose per fraction = {rx_fx:.2f}; must be a whole number of fractions.")
         if all(c.get(k) for k in needed):
-            if c["planned_last_tx"] <= c["first_tx"]:
-                self.add_error("planned_last_tx", "Must be after the first treatment.")
             if c["last_tx_before_gap"] < c["first_tx"]:
                 self.add_error("last_tx_before_gap", "Cannot be before the first treatment.")
             if c["first_tx_after_gap"] <= c["last_tx_before_gap"]:
                 self.add_error("first_tx_after_gap", "Must be after the last treatment before the gap.")
-            if c["proposed_final_tx"] < c["first_tx_after_gap"]:
-                self.add_error("proposed_final_tx", "Cannot be before the first treatment after the gap.")
+        if c.get("rx_dose_per_fx_gy") and c.get("rx_total_dose_gy") and c.get("pre_fx") is not None:
+            rx_fx = c["rx_total_dose_gy"] / c["rx_dose_per_fx_gy"]
+            if c["pre_fx"] >= rx_fx:
+                self.add_error("pre_fx",
+                               f"Must be fewer than the prescribed fraction count ({rx_fx:g}).")
         return c

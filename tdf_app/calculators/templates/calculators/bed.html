@@ -3,8 +3,11 @@
 {% block content %}
 <div class="page-head">
   <h1>BED — Linear-Quadratic Gap Compensation</h1>
-  <p>Compares the biologically effective dose of the original prescription against a proposed schedule with a
-     treatment gap, for tumor and for early- and late-responding normal tissue. Dose in Gy.</p>
+  <p>Solves for the make-up needed to restore the prescribed tumor BED after a treatment gap — by adding fractions
+     at the same dose per fraction, by raising the dose per fraction over the fractions still owed so no treatment
+     days are added, or by giving those fractions BID — and shows what each schedule does to early- and
+     late-responding normal tissue. Treatment is assumed Monday–Friday; the finish date follows from the
+     fraction count. Dose in Gy.</p>
 </div>
 
 <div class="grid">
@@ -14,6 +17,13 @@
     <div class="card-body">
       {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
       {% if error %}<div class="form-errors">{{ error }}</div>{% endif %}
+
+      <fieldset>
+        <legend>Calculation</legend>
+        <div class="fields">
+          {% include "calculators/_field.html" with field=form.mode full=True %}
+        </div>
+      </fieldset>
 
       <fieldset>
         <legend>Original prescription</legend>
@@ -30,23 +40,13 @@
           {% include "calculators/_field.html" with field=form.planned_last_tx %}
           {% include "calculators/_field.html" with field=form.last_tx_before_gap %}
           {% include "calculators/_field.html" with field=form.first_tx_after_gap %}
-          {% include "calculators/_field.html" with field=form.proposed_final_tx %}
         </div>
       </fieldset>
 
       <fieldset>
         <legend>Delivered before gap</legend>
         <div class="fields">
-          {% include "calculators/_field.html" with field=form.pre_dose_per_fx_gy %}
           {% include "calculators/_field.html" with field=form.pre_fx %}
-        </div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Proposed after gap</legend>
-        <div class="fields">
-          {% include "calculators/_field.html" with field=form.post_dose_per_fx_gy %}
-          {% include "calculators/_field.html" with field=form.post_fx %}
         </div>
       </fieldset>
 
@@ -88,36 +88,79 @@
         {% if result.warnings %}
         <div class="alert alert-warn"><strong>Check:</strong><ul>{% for w in result.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>
         {% endif %}
+        {% if mode == "dose" %}
         <div class="result-hero">
           <div class="stat primary">
+            <div class="k">Dose per fraction</div>
+            <div class="v">{{ result.dose_per_fx|floatformat:2 }}<span class="u">Gy</span></div>
+            <div class="u">for the {{ result.post_fx }} remaining fx, up from {{ result.dose_per_fx_original|floatformat:-2 }} Gy ({% if result.dose_increase_per_fx > 0 %}+{% endif %}{{ result.dose_increase_per_fx|floatformat:2 }} Gy/fx; exact {{ result.dose_per_fx_exact|floatformat:3 }}, rounded up to the cGy)</div>
+          </div>
+          <div class="stat">
+            <div class="k">Additional dose</div>
+            <div class="v">{% if result.extra_dose > 0 %}+{% endif %}{{ result.extra_dose|floatformat:-2 }}<span class="u">Gy</span></div>
+            <div class="u">{{ result.total_dose|floatformat:-2 }} Gy total vs {{ form.rx_total_dose_gy.value }} Gy prescribed</div>
+          </div>
+          <div class="stat">
+            <div class="k">Finish date</div>
+            <div class="v" style="font-size:22px">{{ result.final_tx_date|date:"n/j/Y" }}</div>
+            <div class="u">no extra treatment days{% if bid %} · BID{% endif %} · Mon–Fri · {{ result.post_calendar_days }} calendar days after resumption · {{ result.bed.total_days }} overall</div>
+          </div>
+        </div>
+        {% else %}
+        <div class="result-hero">
+          <div class="stat primary">
+            <div class="k">Fractions to add</div>
+            <div class="v">{% if result.fractions_to_add > 0 %}+{% endif %}{{ result.fractions_to_add }}<span class="u">fx</span></div>
+            <div class="u">{{ result.post_fx_required }} post-gap fx of {{ form.rx_dose_per_fx_gy.value }} Gy instead of the {{ result.fx_remaining_planned|floatformat:0 }} remaining — tumor BED {{ result.tumor_pct_required|floatformat:1 }}% of Rx (exact {{ result.post_fx_exact|floatformat:2 }} fx)</div>
+          </div>
+          <div class="stat">
+            <div class="k">Additional dose</div>
+            <div class="v">{% if result.extra_dose > 0 %}+{% endif %}{{ result.extra_dose|floatformat:-2 }}<span class="u">Gy</span></div>
+            <div class="u">{{ result.total_dose|floatformat:-2 }} Gy total vs {{ form.rx_total_dose_gy.value }} Gy prescribed</div>
+          </div>
+          <div class="stat">
+            <div class="k">Finish date</div>
+            <div class="v" style="font-size:22px">{{ result.final_tx_date|date:"n/j/Y" }}</div>
+            <div class="u">{% if bid %}BID · {% endif %}Mon–Fri · {{ result.post_calendar_days }} calendar days after resumption · {{ result.bed.total_days }} overall</div>
+          </div>
+        </div>
+        {% endif %}
+        <div class="result-hero" style="margin-top:12px">
+          <div class="stat">
             <div class="k">Tumor BED</div>
-            <div class="v">{{ result.tumor.percent_of_rx|floatformat:1 }}<span class="u">%</span></div>
-            <div class="u">of prescription ({{ result.tumor.total|floatformat:1 }} / {{ result.tumor.prescribed|floatformat:1 }} Gy)</div>
+            <div class="v">{{ result.bed.tumor.percent_of_rx|floatformat:1 }}<span class="u">%</span></div>
+            <div class="u">of prescription ({{ result.bed.tumor.total|floatformat:1 }} / {{ result.bed.tumor.prescribed|floatformat:1 }} Gy)</div>
           </div>
           <div class="stat">
             <div class="k">Early normal tissue</div>
-            <div class="v">{{ result.early.percent_of_rx|floatformat:1 }}<span class="u">%</span></div>
-            <div class="u">{{ result.early.total|floatformat:1 }} / {{ result.early.prescribed|floatformat:1 }} Gy</div>
+            <div class="v">{{ result.bed.early.percent_of_rx|floatformat:1 }}<span class="u">%</span></div>
+            <div class="u">{{ result.bed.early.total|floatformat:1 }} / {{ result.bed.early.prescribed|floatformat:1 }} Gy</div>
           </div>
           <div class="stat">
             <div class="k">Late normal tissue</div>
-            <div class="v">{{ result.late.percent_of_rx|floatformat:1 }}<span class="u">%</span></div>
-            <div class="u">{{ result.late.total|floatformat:1 }} / {{ result.late.prescribed|floatformat:1 }} Gy</div>
+            <div class="v">{{ result.bed.late.percent_of_rx|floatformat:1 }}<span class="u">%</span></div>
+            <div class="u">{{ result.bed.late.total|floatformat:1 }} / {{ result.bed.late.prescribed|floatformat:1 }} Gy</div>
           </div>
         </div>
-        <p class="summary-text" style="margin:16px 0 0">{{ result.summary }}</p>
+        {% if mode == "fractions" and result.neighbours %}
+        <p class="formula-note" style="margin:12px 0 0">Nearest whole-fraction options:
+          {% for n in result.neighbours %}{% if not forloop.first %} · {% endif %}{% if n.0 == result.post_fx_required %}<strong>{{ n.0 }} fx → {{ n.1|floatformat:1 }}% ({{ n.2|date:"n/j" }})</strong>{% else %}{{ n.0 }} fx → {{ n.1|floatformat:1 }}% ({{ n.2|date:"n/j" }}){% endif %}{% endfor %}.
+          The count nearest 100% is used; a whole fraction cannot match the prescription exactly.</p>
+        {% endif %}
+        <p class="formula-note" style="margin:12px 0 0">Delivered before the gap: <strong>{{ result.pre_fx }} fx × {{ result.pre_dose_per_fx|floatformat:-2 }} Gy</strong>{% if result.pre_fx_from_calendar %} — counted from the calendar (Mon–Fri, {{ form.first_tx.value }} to {{ form.last_tx_before_gap.value }}); enter the count in the form if days were missed.{% else %} — as entered.{% endif %}</p>
+        <p class="summary-text" style="margin:12px 0 0">{{ result.bed.summary }}</p>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>BED by tissue</h2><span class="hint">Gy</span></div>
+      <div class="card-head"><h2>BED by tissue</h2><span class="hint">biologically effective dose, Gy — not physical dose</span></div>
       <div class="card-body">
         <table class="data">
           <thead>
             <tr><th>Tissue</th><th class="num">Prescribed</th><th class="num">Before gap</th><th class="num">After gap</th><th class="num">Total</th><th class="num">% of Rx</th></tr>
           </thead>
           <tbody>
-            {% for t in result.tissues %}
+            {% for t in result.bed.tissues %}
             <tr{% if forloop.first %} class="total"{% endif %}>
               <td style="min-width:150px"><strong>{{ t.name }}</strong><br><span class="label" style="font-size:12px;color:var(--muted)">α/β {{ t.alpha_beta }} · K {{ t.k }} · Tk {{ t.tk|floatformat:0 }}</span></td>
               <td class="num">{{ t.prescribed|floatformat:2 }}</td>
@@ -133,22 +176,64 @@
             {% endfor %}
           </tbody>
         </table>
-        <p class="formula-note">"Before gap" is the pre-gap BED evaluated at the date of resumption, i.e. including repopulation during the gap
-           (worksheet column "After Gap" row "Before Gap"). BED at the last pre-gap treatment date: tumor {{ result.tumor.before_gap|floatformat:2 }},
-           early {{ result.early.before_gap|floatformat:2 }}, late {{ result.late.before_gap|floatformat:2 }} Gy.</p>
+        <p class="formula-note">These are biologically effective doses, N·d·(1 + d/(α/β)), not physical doses: {{ form.rx_total_dose_gy.value }} Gy in {{ form.rx_dose_per_fx_gy.value }} Gy fractions has a prescribed BED of {{ result.bed.tumor.prescribed|floatformat:1 }} Gy for the tumor (α/β {{ result.bed.tumor.alpha_beta }}, less the planned course's repopulation term) and {{ result.bed.late.prescribed|floatformat:1 }} Gy for late tissue (α/β {{ result.bed.late.alpha_beta }}).</p>
+        <p class="formula-note">Total = LQ dose of all fractions − K·(T − T<sub>k</sub>) charged once on the overall course (first to last fraction).
+           "Before gap" is the pre-gap BED evaluated at the date of resumption (includes repopulation during the gap, once past T<sub>k</sub>);
+           "After gap" is the remainder, so the columns add up. BED at the last pre-gap treatment date: tumor {{ result.bed.tumor.before_gap|floatformat:2 }},
+           early {{ result.bed.early.before_gap|floatformat:2 }}, late {{ result.bed.late.before_gap|floatformat:2 }} Gy.</p>
       </div>
     </div>
+
+    {% if scenarios %}
+    <div class="card">
+      <div class="card-head"><h2>All options</h2><span class="hint">same inputs</span></div>
+      <div class="card-body">
+        <table class="data">
+          <thead>
+            <tr><th>Option</th><th class="num">After gap</th><th class="num">Extra fx</th><th class="num">Extra dose</th><th class="num">Finish</th><th class="num">Tumor</th><th class="num">Early</th><th class="num">Late</th></tr>
+          </thead>
+          <tbody>
+            {% for sc in scenarios %}
+            <tr{% if sc.key == selected_key %} class="total"{% endif %}>
+              <td style="min-width:140px"><strong>{{ sc.label }}</strong>{% if sc.key == selected_key %}<br><span class="label" style="font-size:12px;color:var(--muted)">shown above</span>{% endif %}</td>
+              {% if sc.error %}
+              <td colspan="7" style="color:var(--bad);font-size:12.5px">{{ sc.error }}</td>
+              {% else %}
+              <td class="num" style="white-space:nowrap">{{ sc.schedule }}</td>
+              <td class="num">{% if sc.fractions_to_add > 0 %}+{{ sc.fractions_to_add }}{% else %}—{% endif %}</td>
+              <td class="num" style="white-space:nowrap">{% if sc.extra_dose > 0 %}+{% endif %}{{ sc.extra_dose|floatformat:-2 }} Gy</td>
+              <td class="num">{{ sc.final_tx_date|date:"n/j" }}<br><span class="label" style="font-size:12px;color:var(--muted)">{{ sc.post_calendar_days }} d</span></td>
+              <td class="num">{{ sc.tumor_pct|floatformat:1 }}%</td>
+              <td class="num">{{ sc.early_pct|floatformat:1 }}%</td>
+              <td class="num">
+                {% if sc.late_pct >= 95 and sc.late_pct <= 105 %}<span class="badge badge-ok">{{ sc.late_pct|floatformat:1 }}%</span>
+                {% elif sc.late_pct > 105 %}<span class="badge badge-bad">{{ sc.late_pct|floatformat:1 }}%</span>
+                {% else %}<span class="badge badge-warn">{{ sc.late_pct|floatformat:1 }}%</span>{% endif %}
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="formula-note">"Add fractions" keeps the prescription dose per fraction. "Raise dose/fx" and "BID" keep the fractions still owed on the prescription and solve the dose per fraction; BID gives two of them per treatment day at least 6 hours apart, which the LQ model treats as fully repaired, independent fractions, so the course finishes sooner and the repopulation penalty is smaller.</p>
+      </div>
+    </div>
+    {% endif %}
 
     <div class="card">
       <div class="card-head"><h2>Schedule summary</h2></div>
       <div class="card-body">
         <table class="data">
           <tbody>
-            <tr><td class="label">Prescription</td><td class="num">{{ result.rx_fx|floatformat:0 }} fx · {{ form.rx_total_dose_gy.value }} Gy over {{ result.rx_calendar_days }} days</td></tr>
-            <tr><td class="label">Delivered before gap</td><td class="num">{{ form.pre_fx.value }} fx · {{ result.pre_total_dose|floatformat:-2 }} Gy over {{ result.pre_calendar_days }} days</td></tr>
-            <tr><td class="label">Gap</td><td class="num">{{ result.gap_days }} days</td></tr>
-            <tr><td class="label">Proposed after gap</td><td class="num">{{ form.post_fx.value }} fx · {{ result.post_total_dose|floatformat:-2 }} Gy over {{ result.post_calendar_days }} days</td></tr>
-            <tr class="total"><td class="label">Total</td><td class="num">{{ result.total_dose|floatformat:-2 }} Gy · first to last treatment {{ result.total_days }} days</td></tr>
+            <tr><td class="label">Prescription</td><td class="num">{{ result.bed.rx_fx|floatformat:0 }} fx · {{ form.rx_total_dose_gy.value }} Gy over {{ result.bed.rx_calendar_days }} calendar days</td></tr>
+            <tr><td class="label">Delivered before gap</td><td class="num">{{ result.pre_fx }} fx · {{ result.pre_dose_per_fx|floatformat:-2 }} Gy/fx · {{ result.bed.pre_total_dose|floatformat:-2 }} Gy over {{ result.bed.pre_calendar_days }} calendar days{% if result.pre_fx_from_calendar %} <span class="label" style="font-size:12px;color:var(--muted)">(counted from calendar)</span>{% endif %}</td></tr>
+            <tr><td class="label">Gap</td><td class="num">{{ result.bed.gap_days }} calendar days</td></tr>
+            {% if mode == "dose" %}
+            <tr><td class="label">Required after gap</td><td class="num">{{ result.post_fx }} fx · {{ result.dose_per_fx|floatformat:2 }} Gy/fx · {{ result.post_total_dose|floatformat:-2 }} Gy over {{ result.post_calendar_days }} calendar days, Mon–Fri{% if bid %}, BID{% endif %}, finishing {{ result.final_tx_date|date:"n/j/Y" }}</td></tr>
+            {% else %}
+            <tr><td class="label">Required after gap</td><td class="num">{{ result.post_fx_required }} fx · {{ form.rx_dose_per_fx_gy.value }} Gy/fx · {{ result.post_total_dose|floatformat:-2 }} Gy over {{ result.post_calendar_days }} calendar days, Mon–Fri{% if bid %}, BID{% endif %}, finishing {{ result.final_tx_date|date:"n/j/Y" }}</td></tr>
+            {% endif %}
+            <tr class="total"><td class="label">Total</td><td class="num">{{ result.total_dose|floatformat:-2 }} Gy · first to last treatment {{ result.bed.total_days }} calendar days</td></tr>
           </tbody>
         </table>
       </div>
@@ -168,13 +253,39 @@
         <div class="formula">BED<sub>normal</sub> = N · d · (1 + d / (α/β)) − K · T</div>
         <p class="formula-note">Eq. (A): N = number of well-spaced fractions, d = dose per fraction (Gy).</p>
         <div class="formula">BED<sub>tumor</sub> = N · d · (1 + d / (α/β)) − K · (T − T<sub>k</sub>)&nbsp;&nbsp; for T ≥ T<sub>k</sub></div>
-        <p class="formula-note">Eq. (B): T = overall treatment time, T<sub>k</sub> = lag before rapid repopulation, K = daily BED-equivalent of repopulation.</p>
+        <p class="formula-note">Eq. (B): T = overall treatment time in calendar days (weekends and the gap count, since repopulation continues on days without treatment), T<sub>k</sub> = lag before rapid repopulation, K = daily BED-equivalent of repopulation. Fractions are given Monday–Friday only; finish dates skip weekends.</p>
+        <p class="formula-note"><strong>Add-fractions solver.</strong> Post-gap fractions N are stepped up from 0 until tumor LQ(delivered + N post-gap fx) − K·(T<sub>overall</sub> − T<sub>k</sub>) reaches BED<sub>prescribed</sub>, where T<sub>overall</sub> runs from the first fraction to the N-th post-gap fraction; of that N and N − 1, the one whose tumor BED is nearer the prescription is reported. For each N the finish date is the date of the N-th fraction at the chosen fractions per week, so adding a fraction also adds the repopulation cost of the extra calendar days. Fractions to add = N − (prescribed fx − delivered fx).</p>
+        <p class="formula-note"><strong>Dose-per-fraction solver (also used for BID).</strong> N is fixed at the fractions still owed (prescribed fx − delivered fx), so the finish date and post-gap days T<sub>post</sub> are fixed too. The post-gap dose d solves N·d·(1 + d/(α/β)) = BED<sub>prescribed</sub> − LQ<sub>delivered</sub> + K·(T<sub>overall</sub> − T<sub>k</sub>) (positive root of the quadratic), rounded up to the nearest cGy so the delivered tumor BED is never below prescription.</p>
       </div>
     </div>
   </div>
 </div>
 {% endblock %}
 {% block script %}
+  (function () {
+    // Planned last treatment = prescribed fractions, Mon-Fri, from the first treatment.
+    var first = document.getElementById('id_first_tx');
+    var dose = document.getElementById('id_rx_dose_per_fx_gy');
+    var total = document.getElementById('id_rx_total_dose_gy');
+    var last = document.getElementById('id_planned_last_tx');
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    function iso(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+    function fill() {
+      var n = parseFloat(total.value) / parseFloat(dose.value);
+      if (!first.value || !isFinite(n) || n < 1 || Math.abs(n - Math.round(n)) > 1e-9) { last.value = ''; return; }
+      n = Math.round(n);
+      var p = first.value.split('-');
+      var d = new Date(p[0], p[1] - 1, p[2]);
+      var given = 1;
+      while (given < n) {
+        d.setDate(d.getDate() + 1);
+        if (d.getDay() !== 0 && d.getDay() !== 6) given += 1;
+      }
+      last.value = iso(d);
+    }
+    [first, dose, total].forEach(function (el) { el.addEventListener('input', fill); el.addEventListener('change', fill); });
+    fill();
+  })();
   document.getElementById('tumor-preset').addEventListener('change', function () {
     if (!this.value) return;
     var p = this.value.split('|');
