@@ -925,6 +925,53 @@ def compare_schedules(inp: BEDMakeupInput) -> list:
 
 
 # --------------------------------------------------------------------------- #
+#  Plain BED / EQD2 of a single schedule (no time correction)
+# --------------------------------------------------------------------------- #
+
+EQD2_REF_DOSE_GY = 2.0
+
+
+def eqd2_from_bed(bed_gy: float, alpha_beta: float) -> float:
+    """EQD2 = BED / (1 + 2/(a/b)): the total dose in 2 Gy fractions with the same BED."""
+    return bed_gy / (1.0 + EQD2_REF_DOSE_GY / alpha_beta)
+
+
+@dataclass
+class BEDEQD2Row:
+    name: str
+    alpha_beta: float
+    bed: float
+    eqd2: float
+
+
+@dataclass
+class BEDEQD2Result:
+    n_fx: int
+    dose_per_fx: float
+    total_dose: float
+    rows: list
+
+
+def calculate_bed_eqd2(n_fx: int, dose_per_fx_gy: float, tissues) -> BEDEQD2Result:
+    """
+    BED = N d (1 + d/(a/b)) and EQD2 = BED / (1 + 2/(a/b)) for one schedule,
+    for each (name, alpha/beta) in `tissues`.  No repopulation / overall-time term.
+    """
+    if n_fx < 1:
+        raise ValueError("Number of fractions must be at least 1.")
+    if dose_per_fx_gy <= 0:
+        raise ValueError("Dose per fraction must be greater than zero.")
+    rows = []
+    for name, ab in tissues:
+        if ab <= 0:
+            raise ValueError(f"{name} \u03b1/\u03b2 must be greater than zero.")
+        b = lq(n_fx, dose_per_fx_gy, TissueParams(alpha_beta=ab))
+        rows.append(BEDEQD2Row(name=name, alpha_beta=ab, bed=b, eqd2=eqd2_from_bed(b, ab)))
+    return BEDEQD2Result(n_fx=n_fx, dose_per_fx=dose_per_fx_gy,
+                         total_dose=n_fx * dose_per_fx_gy, rows=rows)
+
+
+# --------------------------------------------------------------------------- #
 #  Reference data (Alpha-Beta and Quick Rule of Thumb sheets)
 # --------------------------------------------------------------------------- #
 

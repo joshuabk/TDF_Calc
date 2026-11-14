@@ -526,7 +526,7 @@ class TDFDerivedDatesTests(TestCase):
 
 class ViewTests(TestCase):
     def test_pages_render(self):
-        for name in ["home", "tdf", "bed", "reference", "rule_of_thumb"]:
+        for name in ["home", "tdf", "bed", "bed_eqd2", "reference", "rule_of_thumb"]:
             r = self.client.get(reverse(name))
             self.assertEqual(r.status_code, 200, name)
 
@@ -654,3 +654,40 @@ class ViewTests(TestCase):
         self.assertContains(r, "2/13/2026")           # derived planned end: 30 fx from 1/5
         self.assertContains(r, "15 fx over 18 days (counted from calendar)")   # 1/5..1/23 = 15 weekdays
         self.assertNotContains(r, "id_proposed_finish_date")
+
+
+class BEDEQD2Tests(TestCase):
+    def test_engine_textbook_values(self):
+        from .engine import calculate_bed_eqd2
+        r = calculate_bed_eqd2(30, 2.0, [("Tumor", 10.0), ("Late", 3.0)])
+        self.assertAlmostEqual(r.total_dose, 60.0)
+        self.assertAlmostEqual(r.rows[0].bed, 72.0)
+        self.assertAlmostEqual(r.rows[0].eqd2, 60.0)       # 2 Gy/fx: EQD2 = physical dose
+        self.assertAlmostEqual(r.rows[1].bed, 100.0)
+        self.assertAlmostEqual(r.rows[1].eqd2, 60.0)
+        r = calculate_bed_eqd2(5, 10.0, [("Tumor", 10.0), ("Late", 3.0)])   # SBRT 50 Gy / 5
+        self.assertAlmostEqual(r.rows[0].bed, 100.0)
+        self.assertAlmostEqual(r.rows[0].eqd2, 100.0 / 1.2)
+        self.assertAlmostEqual(r.rows[1].bed, 50.0 * (1 + 10.0 / 3.0))
+        self.assertAlmostEqual(r.rows[1].eqd2, 50.0 * (10.0 + 3.0) / (2.0 + 3.0))
+
+    def test_post(self):
+        r = self.client.post(reverse("bed_eqd2"), {
+            "dose_per_fx_gy": "10", "n_fx": "5", "tumor_alpha_beta": "10", "late_alpha_beta": "3"})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "100.00")
+        self.assertContains(r, "83.33")
+        self.assertContains(r, "216.67")
+        self.assertContains(r, "130.00")
+
+    def test_rejects_zero_alpha_beta(self):
+        r = self.client.post(reverse("bed_eqd2"), {
+            "dose_per_fx_gy": "2", "n_fx": "30", "tumor_alpha_beta": "0", "late_alpha_beta": "3"})
+        self.assertEqual(r.status_code, 200)
+        self.assertNotContains(r, "EQD2 (Gy)")
+
+    def test_nav_order(self):
+        html = self.client.get(reverse("home")).content.decode()
+        nav = html[html.index('<nav class="nav">'):html.index("</nav>")]
+        self.assertLess(nav.index("BED / LQ"), nav.index("BED / EQD2"))
+        self.assertLess(nav.index("BED / EQD2"), nav.index(">TDF<"))

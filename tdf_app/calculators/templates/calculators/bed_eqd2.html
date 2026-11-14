@@ -1,0 +1,95 @@
+{% extends "calculators/base.html" %}
+{% block title %}BED / EQD2 Calculator{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>BED &amp; EQD2 — Single Schedule</h1>
+  <p>Biologically Effective Dose and the equivalent total dose in 2 Gy fractions (EQD2) for one fractionation
+     schedule, using the linear-quadratic model. No overall-time (repopulation) correction is applied; for a
+     treatment gap use the BED / LQ page.</p>
+</div>
+
+<div class="grid">
+  <form method="post" class="card" novalidate>
+    {% csrf_token %}
+    <div class="card-head"><h2>Inputs</h2><span class="hint">Dose in Gy</span></div>
+    <div class="card-body">
+      {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+      {% if error %}<div class="form-errors">{{ error }}</div>{% endif %}
+
+      <fieldset>
+        <legend>Schedule</legend>
+        <div class="fields">
+          {% include "calculators/_field.html" with field=form.dose_per_fx_gy %}
+          {% include "calculators/_field.html" with field=form.n_fx %}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Tissue α/β</legend>
+        <div class="fields">
+          {% include "calculators/_field.html" with field=form.tumor_alpha_beta %}
+          {% include "calculators/_field.html" with field=form.late_alpha_beta %}
+        </div>
+      </fieldset>
+
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Calculate</button>
+        <a class="btn btn-secondary" href="{% url 'bed_eqd2' %}">Reset</a>
+        {% if result %}<button class="btn btn-secondary" type="button" onclick="window.print()">Print</button>{% endif %}
+      </div>
+    </div>
+  </form>
+
+  <div>
+    {% if result %}
+    <div class="card">
+      <div class="card-head"><h2>Result</h2>
+        <span class="hint">{{ result.n_fx }} fx × {{ result.dose_per_fx|floatformat:"-2" }} Gy = {{ result.total_dose|floatformat:"-2" }} Gy</span></div>
+      <div class="card-body">
+        <div class="result-hero" style="grid-template-columns:repeat(2, 1fr)">
+          {% for row in result.rows %}
+          <div class="stat{% if forloop.first %} primary{% endif %}">
+            <div class="k">{{ row.name }} BED</div>
+            <div class="v">{{ row.bed|floatformat:2 }}</div>
+            <div class="u">Gy · α/β {{ row.alpha_beta|floatformat:"-2" }}</div>
+          </div>
+          <div class="stat{% if forloop.first %} primary{% endif %}">
+            <div class="k">{{ row.name }} EQD2</div>
+            <div class="v">{{ row.eqd2|floatformat:2 }}</div>
+            <div class="u">Gy · α/β {{ row.alpha_beta|floatformat:"-2" }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        <table class="data" style="margin-top:16px">
+          <thead><tr><th>Tissue</th><th class="num">α/β (Gy)</th><th class="num">BED (Gy)</th><th class="num">EQD2 (Gy)</th></tr></thead>
+          <tbody>
+          {% for row in result.rows %}
+            <tr><td><strong>{{ row.name }}</strong></td><td class="num">{{ row.alpha_beta|floatformat:"-2" }}</td>
+                <td class="num">{{ row.bed|floatformat:2 }}</td><td class="num">{{ row.eqd2|floatformat:2 }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <p class="formula-note" style="margin:12px 0 0">BED and EQD2 are biological, not physical, doses and are only comparable at the same α/β.</p>
+      </div>
+    </div>
+    {% else %}
+    <div class="card">
+      <div class="card-body empty">
+        <strong>No calculation yet</strong>
+        Complete the form and select Calculate.
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card no-print">
+      <div class="card-head"><h2>Model</h2></div>
+      <div class="card-body">
+        <div class="formula">BED = N · d · (1 + d / (α/β))</div>
+        <p class="formula-note">N = number of fractions, d = dose per fraction (Gy).</p>
+        <div class="formula">EQD2 = BED / (1 + 2 / (α/β))</div>
+        <p class="formula-note">Total dose in 2 Gy fractions giving the same BED. No repopulation or overall-time term.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

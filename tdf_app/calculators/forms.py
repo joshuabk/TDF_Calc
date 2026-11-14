@@ -161,3 +161,10 @@ class BEDForm(forms.Form):
                 self.add_error("pre_fx",
                                f"Must be fewer than the prescribed fraction count ({rx_fx:g}).")
         return c
+
+
+class BEDEQD2Form(forms.Form):
+    dose_per_fx_gy = _num("Dose per fraction (Gy)", 2, step="0.01", min_value=0.01)
+    n_fx = _int("Number of fractions", 30, min_value=1)
+    tumor_alpha_beta = _num("Tumor \u03b1/\u03b2 (Gy)", DEFAULT_TUMOR.alpha_beta, min_value=0.1)
+    late_alpha_beta = _num("Late normal tissue \u03b1/\u03b2 (Gy)", DEFAULT_LATE.alpha_beta, min_value=0.1)

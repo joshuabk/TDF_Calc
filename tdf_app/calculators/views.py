@@ -1,7 +1,7 @@
 from django.shortcuts import render
 
 from . import engine
-from .forms import BEDForm, TDFForm
+from .forms import BEDEQD2Form, BEDForm, TDFForm
 
 
 def home(request):
@@ -66,6 +66,26 @@ def bed_view(request):
         "scenarios": scenarios, "selected_key": selected_key,
         "presets": engine.TISSUE_PRESETS,
     })
+
+
+def bed_eqd2_view(request):
+    result = None
+    error = None
+    if request.method == "POST":
+        form = BEDEQD2Form(request.POST)
+        if form.is_valid():
+            d = form.cleaned_data
+            try:
+                result = engine.calculate_bed_eqd2(d["n_fx"], d["dose_per_fx_gy"], [
+                    ("Tumor", d["tumor_alpha_beta"]),
+                    ("Late normal tissue", d["late_alpha_beta"]),
+                ])
+            except (ValueError, ZeroDivisionError, OverflowError) as exc:
+                error = str(exc)
+    else:
+        form = BEDEQD2Form()
+    return render(request, "calculators/bed_eqd2.html",
+                  {"form": form, "result": result, "error": error, "active": "bed_eqd2"})
 
 
 def reference_view(request):

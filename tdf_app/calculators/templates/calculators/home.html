@@ -7,17 +7,23 @@
      information is stored; print or save each evaluation to the patient record.</p>
 </div>
 <div class="tiles">
-  <a class="tile" href="{% url 'tdf' %}">
-    <span class="tag">Calculator</span>
-    <h3>TDF — Fractions to Add</h3>
-    <p>Time-Dose-Fractionation (Orton &amp; Ellis). Computes the TDF lost during a rest period and the number of
-       extra fractions needed at the same dose per fraction to recover the prescribed TDF.</p>
-  </a>
   <a class="tile" href="{% url 'bed' %}">
     <span class="tag">Calculator</span>
     <h3>BED — Linear-Quadratic Model</h3>
     <p>Biologically Effective Dose with tumor repopulation. Compares a proposed post-gap schedule to the original
        prescription for tumor, early- and late-responding normal tissue.</p>
+  </a>
+  <a class="tile" href="{% url 'bed_eqd2' %}">
+    <span class="tag">Calculator</span>
+    <h3>BED &amp; EQD2</h3>
+    <p>Biologically Effective Dose and equivalent dose in 2 Gy fractions for a single fractionation schedule,
+       for tumor and late-responding normal tissue.</p>
+  </a>
+  <a class="tile" href="{% url 'tdf' %}">
+    <span class="tag">Calculator</span>
+    <h3>TDF — Fractions to Add</h3>
+    <p>Time-Dose-Fractionation (Orton &amp; Ellis). Computes the TDF lost during a rest period and the number of
+       extra fractions needed at the same dose per fraction to recover the prescribed TDF.</p>
   </a>
   <a class="tile" href="{% url 'reference' %}">
     <span class="tag">Reference</span>
