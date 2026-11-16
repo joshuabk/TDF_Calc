@@ -22,6 +22,7 @@ Two models are implemented:
    fractions are added, so the repopulation penalty is self-consistent.
 """
 
+import math
 from dataclasses import dataclass, field, asdict
 from datetime import date, timedelta
 from typing import Optional
@@ -545,12 +546,37 @@ def _calendar_consistency_warnings(inp, pre_from_calendar: bool) -> list:
     enter it directly if any treatment days were missed before the gap.
     """
     if not pre_from_calendar:
+        available = count_treatment_days(inp.first_tx, inp.last_tx_before_gap, inp.fx_per_week)
+        if inp.pre_fx > available:
+            return [
+                f"{inp.pre_fx} fractions were entered as delivered before the gap, but there are only "
+                f"{available} Mon–Fri treatment days from {inp.first_tx:%m/%d/%Y} to "
+                f"{inp.last_tx_before_gap:%m/%d/%Y}. Check the count and the dates."
+            ]
         return []
     return [
         f"Fractions delivered before the gap ({inp.pre_fx}) were counted from the calendar, "
         f"Mon–Fri {inp.first_tx:%m/%d/%Y} to {inp.last_tx_before_gap:%m/%d/%Y}. If any treatment "
         "days were missed before the gap (holidays, machine down), enter the delivered count directly."
     ]
+
+
+DOSE_PER_FX_WARN_RATIO = 1.5   # warn when the solved dose/fx reaches this multiple of the Rx dose/fx
+
+
+def _require_positive_prescription(inp, rx_fx: float, rx_days: float) -> None:
+    """
+    With a large enough K the repopulation term exceeds the dose term and the
+    prescribed BED is zero or negative; percentages of it are then meaningless.
+    """
+    for name, t in (("tumor", inp.tumor), ("early normal tissue", inp.early),
+                    ("late normal tissue", inp.late)):
+        p = lq(rx_fx, inp.rx_dose_per_fx_gy, t) - repop_loss(t, rx_days)
+        if p <= 0:
+            raise ValueError(
+                f"The prescribed {name} BED works out to {p:.1f} Gy: the repopulation term "
+                f"K·(T − Tk) is larger than the dose term. Check K and Tk for that tissue."
+            )
 
 
 @dataclass
@@ -583,7 +609,7 @@ class BEDMakeupResult:
     pre_fx: int                     # fractions delivered before the gap (entered or from calendar)
     pre_dose_per_fx: float
     pre_fx_from_calendar: bool
-    post_fx_required: int           # whole N whose tumor BED is closest to the prescription
+    post_fx_required: int           # smallest whole N (>= fractions owed) that reaches the prescription
     post_fx_exact: float            # continuous N at that finish date (for display)
     tumor_pct_required: float       # tumor BED % of Rx at post_fx_required
     fx_remaining_planned: float     # rx_fx - pre_fx
@@ -605,12 +631,14 @@ class BEDMakeupResult:
 
 def _tumor_total_for(inp: BEDMakeupInput, n_post: int, rx_fx: float):
     """Tumor BED total (before-at-resume + after) for `n_post` post-gap fractions."""
-    end = nth_treatment_date(inp.first_tx_after_gap, n_post, inp.fx_per_week, inp.fx_per_day)
-    post_days = (end - inp.first_tx_after_gap).days if n_post > 0 else 0
     if n_post > 0:
-        total_days = (end - inp.first_tx).days
+        end = nth_treatment_date(inp.first_tx_after_gap, n_post, inp.fx_per_week, inp.fx_per_day)
+        post_days = (end - inp.first_tx_after_gap).days
     else:
-        total_days = (inp.last_tx_before_gap - inp.first_tx).days
+        # No post-gap fractions: the course ended at the last pre-gap treatment.
+        end = inp.last_tx_before_gap
+        post_days = 0
+    total_days = (end - inp.first_tx).days
     lq_pre = lq(inp.pre_fx, inp.pre_dose_per_fx_gy, inp.tumor)
     total = lq_pre + lq(n_post, inp.post_dose_per_fx_gy, inp.tumor) - repop_loss(inp.tumor, total_days)
     return total, end, post_days, total_days
@@ -618,14 +646,14 @@ def _tumor_total_for(inp: BEDMakeupInput, n_post: int, rx_fx: float):
 
 def calculate_bed_makeup(inp: BEDMakeupInput) -> BEDMakeupResult:
     """
-    Find the whole number of post-gap fractions N (at the chosen post-gap
-    dose/fx) whose tumor BED_total is closest to tumor BED_prescribed, where the
-    finish date — and hence the repopulation penalty K * (post-gap days) — is
-    derived from N itself.  Each extra fraction adds d(1 + d/(a/b)) of BED but
-    also extends the course, which costs K per added calendar day.  The search
-    steps N upward until the prescription is met, then compares that N with
-    N - 1 and keeps whichever lands nearer 100 %: a whole fraction cannot hit
-    the prescription exactly, and 99.9 % is a better answer than 103 %.
+    Find the smallest whole number of post-gap fractions N (at the chosen
+    post-gap dose/fx) whose tumor BED_total reaches tumor BED_prescribed, where
+    the finish date — and hence the repopulation penalty — is derived from N
+    itself.  Each extra fraction adds d(1 + d/(a/b)) of BED but also extends the
+    course, which costs K per added calendar day.  The search starts at the
+    fractions still owed on the prescription (the result is never fewer than
+    prescribed) and steps N upward until the prescription is met, so the
+    delivered tumor BED is never below 100 %.
     """
     if inp.post_dose_per_fx_gy <= 0:
         raise ValueError("Post-gap dose per fraction must be greater than zero.")
@@ -653,9 +681,11 @@ def calculate_bed_makeup(inp: BEDMakeupInput) -> BEDMakeupResult:
         )
 
     prescribed = lq(rx_fx, inp.rx_dose_per_fx_gy, inp.tumor) - repop_loss(inp.tumor, rx_days)
+    _require_positive_prescription(inp, rx_fx, rx_days)
 
     warnings = list(calendar_warnings)
-    n = 0
+    # Never fewer than the fractions still owed on the prescription.
+    n = max(0, int(math.ceil(rx_fx - inp.pre_fx - 1e-9)))
     total, end, post_days, total_days = _tumor_total_for(inp, n, rx_fx)
     while total < prescribed - 1e-9:
         n += 1
@@ -667,13 +697,8 @@ def calculate_bed_makeup(inp: BEDMakeupInput) -> BEDMakeupResult:
             )
         total, end, post_days, total_days = _tumor_total_for(inp, n, rx_fx)
 
-    # n is the first count that meets the prescription; n - 1 falls just short.
-    # Keep whichever is nearer the prescription.
-    if n > 0:
-        total_below, _, _, _ = _tumor_total_for(inp, n - 1, rx_fx)
-        if abs(prescribed - total_below) < abs(total - prescribed):
-            n -= 1
-            total, end, post_days, total_days = _tumor_total_for(inp, n, rx_fx)
+    # n is the smallest count, from the fractions owed upward, that meets the
+    # prescription.  It is kept as is: the result is never rounded down below 100 %.
 
     neighbours = []
     for m in (n - 1, n, n + 1):
@@ -777,7 +802,8 @@ def calculate_bed_dose_makeup(inp: BEDMakeupInput) -> BEDDoseMakeupResult:
 
     T_post is the calendar span of those N fractions at the chosen fx/week, so
     it is fixed and the equation is a quadratic in d.  `inp.post_dose_per_fx_gy`
-    is ignored (it is the unknown).
+    is ignored (it is the unknown).  The result is never set below the
+    prescription dose per fraction.
     """
     if inp.fx_per_week < 1:
         raise ValueError("Fractions per week must be at least 1.")
@@ -804,6 +830,7 @@ def calculate_bed_dose_makeup(inp: BEDMakeupInput) -> BEDDoseMakeupResult:
         raise ValueError("First treatment after the gap must be after the last treatment before it.")
 
     prescribed = lq(rx_fx, inp.rx_dose_per_fx_gy, inp.tumor) - repop_loss(inp.tumor, rx_days)
+    _require_positive_prescription(inp, rx_fx, rx_days)
     end = nth_treatment_date(inp.first_tx_after_gap, n, inp.fx_per_week, inp.fx_per_day)
     post_days = (end - inp.first_tx_after_gap).days
     total_days = (end - inp.first_tx).days
@@ -819,10 +846,26 @@ def calculate_bed_dose_makeup(inp: BEDMakeupInput) -> BEDDoseMakeupResult:
     d = round(steps * DOSE_STEP_GY, 2)
 
     warnings = list(calendar_warnings)
-    if exact <= 0:
+    rx_d = inp.rx_dose_per_fx_gy
+    if d < rx_d - 1e-9:
+        # Never go below the prescription dose per fraction.
+        if exact <= 0:
+            warnings.append(
+                "The dose already delivered before the gap meets the prescribed tumor BED; the "
+                f"remaining fractions are kept at the prescription dose per fraction ({rx_d:g} Gy)."
+            )
+        else:
+            warnings.append(
+                f"The solved dose per fraction ({d:.2f} Gy) is below the prescription, because this "
+                f"schedule finishes sooner than planned. The prescription dose per fraction ({rx_d:g} Gy) "
+                "is kept, so the tumor BED is above 100 %."
+            )
+        d = rx_d
+    elif d >= DOSE_PER_FX_WARN_RATIO * rx_d - 1e-9:
         warnings.append(
-            "The dose already delivered before the gap meets or exceeds the prescribed tumor "
-            "BED; no further dose is required."
+            f"The post-gap dose per fraction ({d:.2f} Gy) is {d / rx_d:.1f}× the prescription dose "
+            f"per fraction ({rx_d:g} Gy). Review late-tissue tolerance at this fraction size, or "
+            "consider adding fractions instead."
         )
 
     evaluated = calculate_bed(BEDInput(

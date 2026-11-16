@@ -63,9 +63,11 @@ class TDFForm(forms.Form):
                                f"Total dose / dose per fraction = {total_fx:.2f}; must be a whole number of fractions.")
         needed = ["start_date", "last_tx_before_break", "first_tx_after_break"]
         if all(c.get(k) for k in needed):
-            if c["last_tx_before_break"] <= c["start_date"]:
+            # Read the values first: add_error() removes the field from cleaned_data.
+            start, last_before, first_after = (c[k] for k in needed)
+            if last_before <= start:
                 self.add_error("last_tx_before_break", "Must be after the start date.")
-            if c["first_tx_after_break"] <= c["last_tx_before_break"]:
+            if first_after <= last_before:
                 self.add_error("first_tx_after_break", "Must be after the last treatment before the break.")
         if c.get("dose_per_fx_gy") and c.get("total_dose_gy") and c.get("fx_treated_before_break") is not None:
             total_fx = c["total_dose_gy"] / c["dose_per_fx_gy"]
@@ -91,8 +93,9 @@ class BEDForm(forms.Form):
         return strategy, int(per_day or 1)
 
     # Original prescription
-    rx_dose_per_fx_gy = _num("Dose per fraction (Gy)", 2, step="0.01")
-    rx_total_dose_gy = _num("Total dose (Gy)", 50, step="0.01")
+    rx_dose_per_fx_gy = _num("Dose per fraction (Gy)", 2, step="0.01", min_value=0.01)
+    rx_total_dose_gy = _num("Total dose (Gy)", 50, step="0.01", min_value=0.01)
+    MAX_RX_FX = 100
 
     # Dates
     first_tx = _date("Date of first treatment")
@@ -145,15 +148,21 @@ class BEDForm(forms.Form):
         c["planned_last_tx"] = None
         if c.get("rx_dose_per_fx_gy") and c.get("rx_total_dose_gy") and c.get("first_tx"):
             rx_fx = c["rx_total_dose_gy"] / c["rx_dose_per_fx_gy"]
-            if abs(rx_fx - round(rx_fx)) < 1e-9 and round(rx_fx) >= 1:
+            if rx_fx > self.MAX_RX_FX + 1e-9:
+                self.add_error("rx_total_dose_gy",
+                               f"Total dose / dose per fraction = {rx_fx:,.0f} fractions; more than "
+                               f"{self.MAX_RX_FX} is not supported. Check the doses.")
+            elif abs(rx_fx - round(rx_fx)) < 1e-9 and round(rx_fx) >= 1:
                 c["planned_last_tx"] = nth_treatment_date(c["first_tx"], int(round(rx_fx)), DEFAULT_FX_PER_WEEK)
             else:
                 self.add_error("rx_total_dose_gy",
                                f"Total dose / dose per fraction = {rx_fx:.2f}; must be a whole number of fractions.")
         if all(c.get(k) for k in needed):
-            if c["last_tx_before_gap"] < c["first_tx"]:
+            # Read the values first: add_error() removes the field from cleaned_data.
+            first, last_before, first_after = (c[k] for k in needed)
+            if last_before < first:
                 self.add_error("last_tx_before_gap", "Cannot be before the first treatment.")
-            if c["first_tx_after_gap"] <= c["last_tx_before_gap"]:
+            if first_after <= last_before:
                 self.add_error("first_tx_after_gap", "Must be after the last treatment before the gap.")
         if c.get("rx_dose_per_fx_gy") and c.get("rx_total_dose_gy") and c.get("pre_fx") is not None:
             rx_fx = c["rx_total_dose_gy"] / c["rx_dose_per_fx_gy"]

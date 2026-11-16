@@ -110,17 +110,17 @@ class BEDMakeupSolverTests(TestCase):
         self.assertEqual([n[0] for n in r.neighbours], [12, 13, 14])
         self.assertAlmostEqual(r.neighbours[0][1], 97.66, places=1)
 
-    def test_rounds_up_when_the_higher_count_is_nearer(self):
-        # Shift resumption to Tue 2/12: the same 12 fx then end Wed 2/27 (15 d) -> same 99.9 %,
-        # so instead vary K so that the lower count undershoots badly.
+    def test_always_rounds_up_to_the_prescription(self):
+        # With K = 0.5 the lower count is the nearer one (99.4 % vs 102.9 %); the
+        # solver still reports the higher count, so tumor BED is never below 100 %.
         inp = self.inp
         inp.tumor = TissueParams(alpha_beta=3, k=0.5, tk=28)
         r = calculate_bed_makeup(inp)
         lo = [n for n in r.neighbours if n[0] == r.post_fx_required - 1][0]
-        hi = [n for n in r.neighbours if n[0] == r.post_fx_required + 1][0]
         chosen = [n for n in r.neighbours if n[0] == r.post_fx_required][0]
-        self.assertLessEqual(abs(chosen[1] - 100), abs(lo[1] - 100))
-        self.assertLessEqual(abs(chosen[1] - 100), abs(hi[1] - 100))
+        self.assertLess(lo[1], 100)
+        self.assertGreaterEqual(chosen[1], 100)
+        self.assertLess(abs(lo[1] - 100), abs(chosen[1] - 100))
 
     def test_one_fewer_fraction_is_short(self):
         inp = self.inp
@@ -152,7 +152,8 @@ class BEDMakeupSolverTests(TestCase):
         inp.post_dose_per_fx_gy = 3
         r = calculate_bed_makeup(inp)
         self.assertLess(r.post_fx_required, 13)
-        self.assertEqual(r.post_fx_required, 6)
+        self.assertEqual(r.post_fx_required, 7)      # 6 fx falls just short; never rounded down
+        self.assertGreaterEqual(r.tumor_pct_required, 100)
 
     def test_repopulation_outpacing_dose_raises(self):
         inp = self.inp
@@ -232,13 +233,14 @@ class BIDTests(TestCase):
 
     def test_add_fractions_bid(self):
         # 10 fx end Fri 2/15 (65 d total): 100 - 0.6*37 = 77.8 (97.6 %)
-        # 11 fx end Mon 2/18 (68 d total): 103.33 - 0.6*40 = 79.33 (99.5 %)  -> nearer
+        # 11 fx end Mon 2/18 (68 d total): 103.33 - 0.6*40 = 79.33 (99.5 %)  -> still short
+        # 12 fx end Mon 2/18 as well (BID):  106.67 - 0.6*40 = 82.67 (103.7 %) -> first to reach 100 %
         r = calculate_bed_makeup(self.inp)
-        self.assertEqual(r.post_fx_required, 11)
-        self.assertEqual(r.fractions_to_add, 6)
+        self.assertEqual(r.post_fx_required, 12)
+        self.assertEqual(r.fractions_to_add, 7)
         self.assertEqual(r.final_tx_date, date(2019, 2, 18))
         self.assertEqual(r.post_calendar_days, 7)
-        self.assertAlmostEqual(r.tumor_pct_required, 99.50, places=1)
+        self.assertAlmostEqual(r.tumor_pct_required, 103.68, places=1)
 
     def test_raise_dose_bid(self):
         # 5 fx BID -> 3 treatment days Mon-Wed; course 12/12 - 2/13 = 63 d:
@@ -691,3 +693,117 @@ class BEDEQD2Tests(TestCase):
         nav = html[html.index('<nav class="nav">'):html.index("</nav>")]
         self.assertLess(nav.index("BED / LQ"), nav.index("BED / EQD2"))
         self.assertLess(nav.index("BED / EQD2"), nav.index(">TDF<"))
+
+
+class Check20261116Tests(TestCase):
+    """Fixes and policy changes following the 2026-11-13 verification."""
+    T = dict(tumor_alpha_beta="10", tumor_k="0.6", tumor_tk="28", early_alpha_beta="10", early_k="0.25",
+             early_tk="0", late_alpha_beta="2.5", late_k="0", late_tk="0")
+
+    def post(self, **over):
+        data = {"mode": "fractions-1", "rx_dose_per_fx_gy": "2", "rx_total_dose_gy": "60",
+                "first_tx": "2026-01-05", "last_tx_before_gap": "2026-01-23",
+                "first_tx_after_gap": "2026-02-09", "pre_fx": "", **self.T}
+        data.update(over)
+        return self.client.post(reverse("bed"), data)
+
+    def inp(self, **over):
+        from .engine import BEDMakeupInput
+        kw = dict(rx_dose_per_fx_gy=2, rx_total_dose_gy=60, first_tx=date(2026, 1, 5),
+                  planned_last_tx=date(2026, 2, 13), last_tx_before_gap=date(2026, 1, 23),
+                  first_tx_after_gap=date(2026, 2, 9), post_dose_per_fx_gy=2)
+        kw.update(over)
+        return BEDMakeupInput(**kw)
+
+    # --- crashes -> field errors
+    def test_last_before_gap_earlier_than_first_is_a_field_error(self):
+        r = self.post(last_tx_before_gap="2026-01-02")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Cannot be before the first treatment.")
+
+    def test_zero_doses_are_field_errors(self):
+        for field in ("rx_total_dose_gy", "rx_dose_per_fx_gy"):
+            r = self.post(**{field: "0"})
+            self.assertEqual(r.status_code, 200, field)
+            self.assertIn(field, r.context["form"].errors)
+
+    def test_absurd_fraction_count_is_a_field_error(self):
+        r = self.post(rx_dose_per_fx_gy="0.000000001")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.context["form"].errors)
+        r = self.post(rx_dose_per_fx_gy="0.01")            # 6,000 fractions
+        self.assertContains(r, "is not supported")
+
+    def test_tdf_last_before_break_earlier_than_start_is_a_field_error(self):
+        r = self.client.post(reverse("tdf"), {
+            "dose_per_fx_gy": "2", "total_dose_gy": "60", "fx_per_day": "1", "fx_per_week": "5",
+            "start_date": "2026-01-05", "last_tx_before_break": "2026-01-02",
+            "first_tx_after_break": "2026-02-09", "fx_treated_before_break": ""})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Must be after the start date.")
+
+    # --- add fractions: never below 100 %, never fewer than prescribed
+    def test_add_fractions_never_below_prescription(self):
+        from datetime import timedelta
+        for k in range(1, 40):
+            fa = date(2026, 1, 23) + timedelta(days=k)
+            if fa.weekday() >= 5:
+                continue
+            r = calculate_bed_makeup(self.inp(first_tx_after_gap=fa))
+            self.assertGreaterEqual(r.tumor_pct_required, 100 - 1e-9, fa)
+            self.assertGreaterEqual(r.fractions_to_add, 0, fa)
+            self.assertAlmostEqual(r.tumor_pct_required, r.bed.tumor.percent_of_rx, places=6)
+
+    def test_uninterrupted_low_dose_course_is_not_shortened(self):
+        # 1.2 Gy x 58 from Thu 1/8/2026 ends on a Monday; the weekend costs more BED than the
+        # Monday fraction adds, but the result must still be the prescribed count.
+        r = calculate_bed_makeup(self.inp(
+            rx_dose_per_fx_gy=1.2, rx_total_dose_gy=69.6, post_dose_per_fx_gy=1.2,
+            first_tx=date(2026, 1, 8), planned_last_tx=date(2026, 3, 30),
+            last_tx_before_gap=date(2026, 1, 8), first_tx_after_gap=date(2026, 1, 9)))
+        self.assertEqual(r.fractions_to_add, 0)
+        self.assertAlmostEqual(r.tumor_pct_required, 100.0, places=6)
+
+    def test_zero_post_gap_fractions_ends_at_last_pre_gap_treatment(self):
+        from .engine import _tumor_total_for
+        inp = self.inp(pre_fx=15, pre_dose_per_fx_gy=2)
+        total, end, post_days, total_days = _tumor_total_for(inp, 0, 30)
+        self.assertEqual(end, date(2026, 1, 23))
+        self.assertEqual((post_days, total_days), (0, 18))
+
+    # --- dose modes: never below the prescription dose, warning on a large dose
+    def test_bid_dose_is_not_set_below_prescription(self):
+        r = calculate_bed_dose_makeup(self.inp(
+            last_tx_before_gap=date(2026, 1, 5), first_tx_after_gap=date(2026, 1, 7), fx_per_day=2))
+        self.assertLess(r.dose_per_fx_exact, 2)
+        self.assertEqual(r.dose_per_fx, 2)
+        self.assertGreater(r.bed.tumor.percent_of_rx, 100)
+        self.assertTrue(any("below the prescription" in w for w in r.warnings))
+
+    def test_large_single_fraction_dose_is_flagged(self):
+        r = calculate_bed_dose_makeup(self.inp(
+            last_tx_before_gap=date(2026, 2, 12), first_tx_after_gap=date(2026, 2, 27)))
+        self.assertEqual(r.post_fx, 1)
+        self.assertAlmostEqual(r.dose_per_fx, 6.54, places=2)
+        self.assertTrue(any("late-tissue tolerance" in w for w in r.warnings))
+
+    def test_modest_dose_increase_is_not_flagged(self):
+        r = calculate_bed_dose_makeup(self.inp())
+        self.assertLess(r.dose_per_fx, 3)
+        self.assertFalse(any("late-tissue tolerance" in w for w in r.warnings))
+
+    # --- input sanity
+    def test_more_fractions_entered_than_treatment_days_warns(self):
+        r = calculate_bed_makeup(self.inp(last_tx_before_gap=date(2026, 1, 9),
+                                          first_tx_after_gap=date(2026, 1, 19), pre_fx=20))
+        self.assertTrue(any("only 5 Mon" in w for w in r.warnings))
+        r = calculate_bed_makeup(self.inp(pre_fx=14))       # fewer than the 15 available: fine
+        self.assertFalse(any("only" in w for w in r.warnings))
+
+    def test_extreme_k_is_an_error(self):
+        r = self.post(tumor_k="10")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Check K and Tk")
+        self.assertIsNone(r.context["result"])
+        r = self.post(early_k="3", mode="dose-1")
+        self.assertContains(r, "early normal tissue BED")

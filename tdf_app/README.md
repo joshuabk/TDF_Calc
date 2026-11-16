@@ -22,7 +22,7 @@ engine against values hand-computed from the spreadsheet's example (e.g. Tumor B
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python manage.py test          # 12 tests
+python manage.py test          # 71 tests
 python manage.py runserver
 ```
 
@@ -61,8 +61,9 @@ calculators/
 ## Clinical notes
 
 - TDF: `TDF = N·d^1.538·(T/N)^-0.169·10^-3` (d in cGy; the page takes Gy and converts), rest-period decay `(T1/(T1+R))^0.11`.
-- BED make-up solver: post-gap fractions N stepped up from 0 until tumor BED(before gap, at resumption) + BED(after gap) ≥ BED(prescribed); the finish date for each N is the date of the N-th fraction at the chosen fx/week, so added fractions also add repopulation days. Fractions to add = N − (Rx fx − delivered fx).
-- BED dose-per-fraction solver: N fixed at Rx fx − delivered fx, T_post fixed by fx/week; d solves N·d·(1+d/(α/β)) = BED(prescribed) − BED(before gap, at resumption) + K·T_post, rounded up to 0.01 Gy.
+- BED make-up solver: post-gap fractions N stepped up from the fractions still owed (never fewer than prescribed) until tumor BED(before gap, at resumption) + BED(after gap) ≥ BED(prescribed); the finish date for each N is the date of the N-th fraction at the chosen fx/week, so added fractions also add repopulation days. Fractions to add = N − (Rx fx − delivered fx).
+- BED dose-per-fraction solver: N fixed at Rx fx − delivered fx, T_post fixed by fx/week; d solves N·d·(1+d/(α/β)) = BED(prescribed) − BED(before gap, at resumption) + K·T_post, rounded up to 0.01 Gy, never set below the prescription dose/fx, with a warning at 1.5× the prescription dose/fx or more.
 - BED: `N·d·(1+d/(α/β)) − K·max(0, T − Tk)`, with the repopulation term charged ONCE on the overall course (first to last fraction) — not per phase. (The worksheet's post-gap cells charged K × post-gap days with no Tk offset, which over-charges by K·(Tk − resumption day) for an early gap.) The tumor term applies repopulation only when `T ≥ Tk`,
   matching the spreadsheet's `IF(T<Tk, …)`.
 - Results are decision support only and must be reviewed by the attending radiation oncologist.
+- Inputs are checked: doses must be at least 0.01 Gy, at most 100 fractions, a prescribed BED that works out to zero or less (extreme K) is an error, and an entered pre-gap count above the available Mon–Fri treatment days raises a warning.
