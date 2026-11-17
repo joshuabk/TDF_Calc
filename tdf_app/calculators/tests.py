@@ -807,3 +807,150 @@ class Check20261116Tests(TestCase):
         self.assertIsNone(r.context["result"])
         r = self.post(early_k="3", mode="dose-1")
         self.assertContains(r, "early normal tissue BED")
+
+
+class FractionationTests(TestCase):
+    """Alternative fractionation at the same tumor BED, repopulation included."""
+    T = dict(tumor_alpha_beta="10", tumor_k="0.6", tumor_tk="28", early_alpha_beta="10", early_k="0.25",
+             early_tk="0", late_alpha_beta="2.5", late_k="0", late_tk="0")
+
+    def run_engine(self, **over):
+        from .engine import FractionationInput, calculate_fractionation
+        kw = dict(ref_dose_per_fx_gy=2.0, ref_n_fx=30, mode="dose", alt_n_fx=20)
+        kw.update(over)
+        return calculate_fractionation(FractionationInput(**kw))
+
+    def post(self, **over):
+        data = {"ref_dose_per_fx_gy": "2", "ref_n_fx": "30", "ref_fx_per_day": "1", "mode": "dose",
+                "alt_n_fx": "20", "alt_dose_per_fx_gy": "", "alt_fx_per_day": "1", "start_weekday": "0",
+                **self.T}
+        data.update(over)
+        return self.client.post(reverse("fractionation"), data)
+
+    def test_course_days(self):
+        from .engine import course_days
+        self.assertEqual(course_days(30), 39)                       # Mon start, 6 weeks: Mon -> 6th Fri
+        self.assertEqual(course_days(20), 25)
+        self.assertEqual(course_days(5), 4)
+        self.assertEqual(course_days(1), 0)
+        self.assertEqual(course_days(5, start_weekday=2), 6)        # Wed -> next Tue
+        self.assertEqual(course_days(30, fx_per_day=2), 18)         # 15 treatment days
+        self.assertEqual(course_days(5, fx_per_day=2), 2)           # 3 treatment days
+
+    def test_reference_bed(self):
+        r = self.run_engine()
+        self.assertEqual(r.reference.overall_days, 39)
+        self.assertAlmostEqual(r.reference.tumor.bed, 72 - 0.6 * 11)        # 65.4
+        self.assertAlmostEqual(r.reference.early.bed, 72 - 0.25 * 39)       # 62.25
+        self.assertAlmostEqual(r.reference.late.bed, 108.0)
+        self.assertAlmostEqual(r.reference.late.eqd2, 60.0)
+
+    def test_total_bed_parts(self):
+        r = self.run_engine(alt_n_fx=35)
+        ref, alt = r.reference.tumor, r.alternative.tumor
+        self.assertAlmostEqual(ref.lq_bed, 72.0)
+        self.assertAlmostEqual(ref.repop, 6.6)
+        self.assertAlmostEqual(alt.reference_lq_bed, 72.0)
+        self.assertAlmostEqual(alt.reference_repop, 6.6)
+        self.assertAlmostEqual(alt.repop, 0.6 * (46 - 28))
+        self.assertAlmostEqual(alt.lq_bed - alt.repop, alt.bed)
+        html = self.post(alt_n_fx="35").content.decode()
+        self.assertIn("Total tumor BED — original schedule", html)
+        self.assertIn("Total tumor BED — adjusted schedule", html)
+        self.assertIn("65.40", html)
+
+    def test_same_fraction_count_returns_the_reference_dose(self):
+        r = self.run_engine(alt_n_fx=30)
+        self.assertAlmostEqual(r.alternative.dose_per_fx, 2.0)
+        self.assertAlmostEqual(r.alternative.tumor.percent_of_ref, 100.0)
+        self.assertAlmostEqual(r.alternative.late.percent_of_ref, 100.0)
+
+    def test_solve_dose_for_20_fractions(self):
+        # 20 fx Mon-Fri = 25 days < Tk 28: no repopulation, so 20 d (1 + d/10) = 65.4
+        r = self.run_engine(alt_n_fx=20)
+        exact = 5 * (-1 + (1 + 4 * 65.4 / 200) ** 0.5)                      # 2.5962
+        self.assertAlmostEqual(r.alternative.dose_per_fx_exact, exact, places=6)
+        self.assertAlmostEqual(r.alternative.dose_per_fx, 2.60)
+        self.assertEqual(r.alternative.overall_days, 25)
+        self.assertAlmostEqual(r.alternative.tumor.bed, 20 * 2.6 * 1.26)
+        self.assertGreaterEqual(r.alternative.tumor.percent_of_ref, 100.0)
+        self.assertLess(r.alternative.tumor.percent_of_ref, 100.5)
+        self.assertAlmostEqual(r.alternative.late.bed, 20 * 2.6 * (1 + 2.6 / 2.5))
+
+    def test_longer_course_pays_repopulation(self):
+        # 35 fx = 46 days: 35 d (1 + d/10) = 65.4 + 0.6 * 18 = 76.2
+        r = self.run_engine(alt_n_fx=35)
+        exact = 5 * (-1 + (1 + 4 * 76.2 / 350) ** 0.5)
+        self.assertAlmostEqual(r.alternative.dose_per_fx_exact, exact, places=6)
+        self.assertGreater(r.alternative.total_dose, 60.0)
+
+    def test_solve_fractions_for_3_gy(self):
+        # 3 Gy: 3.9 per fx. 16 fx = 62.4 (< 65.4); 17 fx = 66.3 over 22 days (< Tk)
+        r = self.run_engine(mode="fractions", alt_n_fx=None, alt_dose_per_fx_gy=3.0)
+        self.assertEqual(r.alternative.n_fx, 17)
+        self.assertEqual(r.alternative.overall_days, 22)
+        self.assertAlmostEqual(r.alternative.tumor.bed, 66.3)
+        self.assertAlmostEqual(r.n_fx_exact, 65.4 / 3.9)
+
+    def test_solve_fractions_past_tk(self):
+        # 1.8 Gy: 2.124 per fx.  36 fx spans 49 days: 76.464 - 12.6 = 63.86 (< 65.4);
+        # 37 fx spans 50 days: 78.588 - 13.2 = 65.388 (< 65.4); 38 fx, 51 days: 80.712 - 13.8 = 66.912
+        r = self.run_engine(mode="fractions", alt_n_fx=None, alt_dose_per_fx_gy=1.8)
+        self.assertEqual(r.alternative.n_fx, 38)
+        self.assertAlmostEqual(r.alternative.tumor.bed, 66.912)
+
+    def test_bid_shortens_the_course(self):
+        daily = self.run_engine(alt_n_fx=30)
+        bid = self.run_engine(alt_n_fx=30, alt_fx_per_day=2)
+        self.assertEqual(bid.alternative.overall_days, 18)
+        self.assertLess(bid.alternative.dose_per_fx, daily.alternative.dose_per_fx)
+        self.assertGreaterEqual(bid.alternative.tumor.percent_of_ref, 100.0)
+
+    def test_table_rows_all_match_the_reference(self):
+        r = self.run_engine(alt_n_fx=12)
+        self.assertTrue(r.table[0].is_reference)
+        self.assertIn(12, [s.n_fx for s in r.table[1:]])
+        for s in r.table[1:]:
+            self.assertGreaterEqual(s.tumor.percent_of_ref, 100.0 - 1e-9)
+            self.assertLess(s.tumor.percent_of_ref, 101.0)
+
+    def test_no_repopulation_is_plain_lq(self):
+        r = self.run_engine(alt_n_fx=5, tumor=TissueParams(10.0, 0.0, 0.0))
+        exact = 5 * (-1 + (1 + 4 * 72 / 50) ** 0.5)
+        self.assertAlmostEqual(r.alternative.dose_per_fx_exact, exact, places=6)
+
+    def test_unreachable_dose_is_an_error(self):
+        with self.assertRaises(ValueError):
+            self.run_engine(mode="fractions", alt_n_fx=None, alt_dose_per_fx_gy=0.2)
+
+    def test_get_and_post(self):
+        self.assertEqual(self.client.get(reverse("fractionation")).status_code, 200)
+        r = self.post()
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "2.60")
+        self.assertContains(r, "Equivalent schedules")
+        r = self.post(mode="fractions", alt_n_fx="", alt_dose_per_fx_gy="3")
+        self.assertEqual(r.context["result"].alternative.n_fx, 17)
+
+    def test_missing_test_value_is_a_field_error(self):
+        r = self.post(alt_n_fx="")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("alt_n_fx", r.context["form"].errors)
+        r = self.post(mode="fractions", alt_dose_per_fx_gy="")
+        self.assertIn("alt_dose_per_fx_gy", r.context["form"].errors)
+
+    def test_bad_inputs_do_not_crash(self):
+        for over in ({"ref_dose_per_fx_gy": "0"}, {"ref_n_fx": "0"}, {"ref_n_fx": "5000"},
+                     {"alt_n_fx": "0"}, {"tumor_alpha_beta": "0"}, {"tumor_k": "50"},
+                     {"mode": "fractions", "alt_dose_per_fx_gy": "0.01"}, {"start_weekday": "6"},
+                     {"alt_fx_per_day": "3"}, {"mode": "x"}):
+            r = self.post(**over)
+            self.assertEqual(r.status_code, 200, over)
+            self.assertIsNone(r.context["result"], over)
+
+    def test_nav_and_home_link(self):
+        html = self.client.get(reverse("home")).content.decode()
+        nav = html[html.index('<nav class="nav">'):html.index("</nav>")]
+        self.assertLess(nav.index("BED / EQD2"), nav.index("Fx Adjust"))
+        self.assertLess(nav.index("Fx Adjust"), nav.index(">TDF<"))
+        self.assertContains(self.client.get(reverse("home")), reverse("fractionation"))

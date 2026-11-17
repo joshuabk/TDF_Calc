@@ -1015,6 +1015,229 @@ def calculate_bed_eqd2(n_fx: int, dose_per_fx_gy: float, tissues) -> BEDEQD2Resu
 
 
 # --------------------------------------------------------------------------- #
+#  Alternative fractionation: same tumor BED (with repopulation), different N / d
+# --------------------------------------------------------------------------- #
+
+MAX_ALT_FX = 100                 # largest fraction count the fraction solver will try
+LQ_HIGH_DOSE_WARN_GY = 10.0      # warn when a schedule's dose/fx exceeds this (LQ less reliable)
+ALT_TABLE_FX = (5, 10, 15, 20, 25, 30, 35, 40)   # fraction counts listed in the comparison table
+_A_MONDAY = date(2024, 1, 1)
+
+
+def course_days(n_fx: int, fx_per_day: int = 1, start_weekday: int = 0,
+                fx_per_week: int = DEFAULT_FX_PER_WEEK) -> int:
+    """
+    Calendar days from the first to the last fraction of an uninterrupted course
+    of `n_fx` fractions that starts on `start_weekday` (0 = Monday ... 4 = Friday).
+    Weekends count, exactly as on the gap page.
+    """
+    start = _A_MONDAY + timedelta(days=int(start_weekday))
+    return (nth_treatment_date(start, n_fx, fx_per_week, fx_per_day) - start).days
+
+
+@dataclass
+class FxTissue:
+    name: str
+    alpha_beta: float
+    k: float
+    tk: float
+    bed: float                  # LQ dose less repopulation over this schedule's overall time
+    reference: float            # the same quantity for the reference schedule
+    percent_of_ref: float
+    eqd2: float                 # EQD2 of the LQ term only (no time correction)
+    lq_bed: float = 0.0         # dose term N d (1 + d/(a/b)) of this schedule
+    repop: float = 0.0          # repopulation loss K (T - Tk) of this schedule
+    reference_lq_bed: float = 0.0
+    reference_repop: float = 0.0
+
+
+@dataclass
+class FxSchedule:
+    n_fx: int
+    dose_per_fx: float
+    fx_per_day: int
+    total_dose: float
+    overall_days: int
+    tumor: FxTissue
+    early: FxTissue
+    late: FxTissue
+    dose_per_fx_exact: Optional[float] = None   # continuous solution before rounding up, when solved
+    is_reference: bool = False
+    is_selected: bool = False
+
+    @property
+    def tissues(self):
+        return [self.tumor, self.early, self.late]
+
+
+@dataclass
+class FractionationInput:
+    # Reference schedule (the one whose tumor BED is to be matched)
+    ref_dose_per_fx_gy: float
+    ref_n_fx: int
+    # "dose": the alternative's fraction count is chosen, its dose/fx is solved.
+    # "fractions": the alternative's dose/fx is chosen, its fraction count is solved.
+    mode: str = "dose"
+    alt_n_fx: Optional[int] = None
+    alt_dose_per_fx_gy: Optional[float] = None
+    ref_fx_per_day: int = 1
+    alt_fx_per_day: int = 1
+    start_weekday: int = 0          # 0 = Monday; sets how many weekends each course spans
+    fx_per_week: int = DEFAULT_FX_PER_WEEK
+    tumor: TissueParams = field(default_factory=lambda: DEFAULT_TUMOR)
+    early: TissueParams = field(default_factory=lambda: DEFAULT_EARLY)
+    late: TissueParams = field(default_factory=lambda: DEFAULT_LATE)
+
+
+@dataclass
+class FractionationResult:
+    mode: str
+    reference: FxSchedule
+    alternative: FxSchedule
+    n_fx_exact: Optional[float]     # continuous fraction count at the solved finish day ("fractions" mode)
+    table: list                     # [FxSchedule]: reference first, then equivalent schedules by fraction count
+    warnings: list = field(default_factory=list)
+
+
+def _schedule_bed(inp: FractionationInput, t: TissueParams, n_fx: int, d: float, fx_per_day: int) -> float:
+    days = course_days(n_fx, fx_per_day, inp.start_weekday, inp.fx_per_week)
+    return lq(n_fx, d, t) - repop_loss(t, days)
+
+
+def _evaluate_schedule(inp: FractionationInput, n_fx: int, d: float, fx_per_day: int,
+                       ref_beds=None, exact: Optional[float] = None) -> FxSchedule:
+    blocks = []
+    for i, (name, t) in enumerate((("Tumor", inp.tumor), ("Early normal tissue", inp.early),
+                                   ("Late normal tissue", inp.late))):
+        b = _schedule_bed(inp, t, n_fx, d, fx_per_day)
+        ref = b if ref_beds is None else ref_beds[i]
+        dose_term = lq(n_fx, d, t)
+        ref_dose_term = lq(inp.ref_n_fx, inp.ref_dose_per_fx_gy, t)
+        ref_repop = repop_loss(t, course_days(inp.ref_n_fx, inp.ref_fx_per_day, inp.start_weekday, inp.fx_per_week))
+        blocks.append(FxTissue(
+            name=name, alpha_beta=t.alpha_beta, k=t.k, tk=t.tk, bed=b, reference=ref,
+            percent_of_ref=(b / ref * 100.0) if ref else 0.0,
+            eqd2=eqd2_from_bed(dose_term, t.alpha_beta),
+            lq_bed=dose_term, repop=dose_term - b,
+            reference_lq_bed=ref_dose_term, reference_repop=ref_repop,
+        ))
+    return FxSchedule(
+        n_fx=n_fx, dose_per_fx=d, fx_per_day=fx_per_day, total_dose=n_fx * d,
+        overall_days=course_days(n_fx, fx_per_day, inp.start_weekday, inp.fx_per_week),
+        tumor=blocks[0], early=blocks[1], late=blocks[2], dose_per_fx_exact=exact,
+        is_reference=ref_beds is None,
+    )
+
+
+def iso_bed_dose_per_fx(inp: FractionationInput, n_fx: int, fx_per_day: int, ref_tumor_bed: float):
+    """
+    Dose per fraction that gives `n_fx` fractions the reference tumor BED:
+        N d (1 + d/(a/b)) = BED_ref + K * max(0, T_N - Tk)
+    T_N is the overall time of the N-fraction course, so a shorter course needs
+    less dose to offset repopulation and a longer one more.  Returns
+    (exact, rounded up to the cGy) so the tumor BED is never below the reference.
+    """
+    days = course_days(n_fx, fx_per_day, inp.start_weekday, inp.fx_per_week)
+    exact = solve_dose_per_fx(n_fx, ref_tumor_bed + repop_loss(inp.tumor, days), inp.tumor.alpha_beta)
+    steps = int(exact / DOSE_STEP_GY - 1e-9) + 1
+    return exact, round(steps * DOSE_STEP_GY, 2)
+
+
+def iso_bed_fractions(inp: FractionationInput, d: float, fx_per_day: int, ref_tumor_bed: float):
+    """
+    Smallest whole number of fractions of `d` Gy whose tumor BED, less the
+    repopulation over that course's own overall time, reaches the reference.
+    Returns (N, continuous N at that course length).
+    """
+    per_fx = d * (1.0 + d / inp.tumor.alpha_beta)
+    for n in range(1, MAX_ALT_FX + 1):
+        days = course_days(n, fx_per_day, inp.start_weekday, inp.fx_per_week)
+        loss = repop_loss(inp.tumor, days)
+        if n * per_fx - loss >= ref_tumor_bed - 1e-9:
+            return n, (ref_tumor_bed + loss) / per_fx
+    raise ValueError(
+        f"No schedule of up to {MAX_ALT_FX} fractions of {d:g} Gy reaches the original tumor BED: "
+        "repopulation outpaces the dose per fraction. Increase the dose per fraction."
+    )
+
+
+def calculate_fractionation(inp: FractionationInput) -> FractionationResult:
+    """
+    Find an alternative fractionation with the same tumor BED as the reference
+    schedule, repopulation included: BED = N d (1 + d/(a/b)) - K * max(0, T - Tk),
+    with T the calendar span of each uninterrupted Mon-Fri course.  Early and
+    late normal-tissue BED are then reported for both schedules.
+    """
+    if inp.ref_n_fx < 1:
+        raise ValueError("Number of fractions must be at least 1.")
+    if inp.ref_dose_per_fx_gy <= 0:
+        raise ValueError("Dose per fraction must be greater than zero.")
+    if inp.ref_fx_per_day < 1 or inp.alt_fx_per_day < 1:
+        raise ValueError("Fractions per day must be at least 1.")
+    for name, t in (("Tumor", inp.tumor), ("Early normal tissue", inp.early), ("Late normal tissue", inp.late)):
+        if t.alpha_beta <= 0:
+            raise ValueError(f"{name} α/β must be greater than zero.")
+
+    reference = _evaluate_schedule(inp, inp.ref_n_fx, inp.ref_dose_per_fx_gy, inp.ref_fx_per_day)
+    for t in reference.tissues:
+        if t.bed <= 0:
+            raise ValueError(
+                f"The original schedule's {t.name.lower()} BED works out to {t.bed:.1f} Gy: the repopulation term "
+                "K·(T − Tk) is larger than the dose term. Check K and Tk for that tissue."
+            )
+    ref_beds = [t.bed for t in reference.tissues]
+    target = reference.tumor.bed
+
+    n_exact = None
+    if inp.mode == "fractions":
+        if inp.alt_dose_per_fx_gy is None or inp.alt_dose_per_fx_gy <= 0:
+            raise ValueError("Enter the adjusted dose per fraction.")
+        n, n_exact = iso_bed_fractions(inp, inp.alt_dose_per_fx_gy, inp.alt_fx_per_day, target)
+        alternative = _evaluate_schedule(inp, n, inp.alt_dose_per_fx_gy, inp.alt_fx_per_day, ref_beds)
+    elif inp.mode == "dose":
+        if inp.alt_n_fx is None or inp.alt_n_fx < 1:
+            raise ValueError("Enter the adjusted number of fractions.")
+        exact, d = iso_bed_dose_per_fx(inp, inp.alt_n_fx, inp.alt_fx_per_day, target)
+        alternative = _evaluate_schedule(inp, inp.alt_n_fx, d, inp.alt_fx_per_day, ref_beds, exact)
+    else:
+        raise ValueError("Unknown calculation.")
+    alternative.is_selected = True
+
+    # Comparison table: the dose/fx that matches the reference tumor BED at a
+    # spread of fraction counts, at the alternative's fractions per day.
+    table = [reference]
+    counts = sorted(set(ALT_TABLE_FX) | {alternative.n_fx})
+    for n in counts:
+        if n == alternative.n_fx:
+            table.append(alternative)
+            continue
+        exact, d = iso_bed_dose_per_fx(inp, n, inp.alt_fx_per_day, target)
+        table.append(_evaluate_schedule(inp, n, d, inp.alt_fx_per_day, ref_beds, exact))
+
+    warnings = []
+    if alternative.dose_per_fx > LQ_HIGH_DOSE_WARN_GY:
+        warnings.append(
+            f"{alternative.dose_per_fx:.2f} Gy per fraction is above {LQ_HIGH_DOSE_WARN_GY:g} Gy, where the "
+            "linear-quadratic model is less reliable."
+        )
+    if alternative.late.percent_of_ref > 110:
+        warnings.append(
+            f"Late-responding normal tissue BED is {alternative.late.percent_of_ref:.1f}% of the original schedule."
+        )
+    if alternative.early.percent_of_ref > 110:
+        warnings.append(
+            f"Early-responding normal tissue BED is {alternative.early.percent_of_ref:.1f}% of the original "
+            "schedule (shorter overall time leaves less time for early-tissue recovery)."
+        )
+    if inp.alt_fx_per_day > 1 or inp.ref_fx_per_day > 1:
+        warnings.append(
+            "BID fractions are treated as fully repaired, independent fractions (at least 6 hours apart)."
+        )
+    return FractionationResult(mode=inp.mode, reference=reference, alternative=alternative,
+                               n_fx_exact=n_exact, table=table, warnings=warnings)
+
+
+# --------------------------------------------------------------------------- #
 #  Reference data (Alpha-Beta and Quick Rule of Thumb sheets)
 # --------------------------------------------------------------------------- #
 

@@ -1,0 +1,227 @@
+{% extends "calculators/base.html" %}
+{% block title %}Fx Adjust{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Fx Adjust — Same Tumor BED, Different Fractionation</h1>
+  <p>Adjusts the number of fractions or the dose per fraction of a schedule, holding the tumor BED
+     the same with repopulation included: a shorter course loses less to repopulation and needs less dose, a longer
+     one needs more. Shows what each schedule does to early- and late-responding normal tissue. Both courses are
+     uninterrupted and treated Monday–Friday. Dose in Gy.</p>
+</div>
+
+<div class="grid">
+  <form method="post" class="card" novalidate id="fx-form">
+    {% csrf_token %}
+    <div class="card-head"><h2>Inputs</h2><span class="hint">Dose in Gy</span></div>
+    <div class="card-body">
+      {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+      {% if error %}<div class="form-errors">{{ error }}</div>{% endif %}
+
+      <fieldset>
+        <legend>Original schedule</legend>
+        <div class="fields">
+          {% include "calculators/_field.html" with field=form.ref_dose_per_fx_gy %}
+          {% include "calculators/_field.html" with field=form.ref_n_fx %}
+          {% include "calculators/_field.html" with field=form.ref_fx_per_day %}
+          {% include "calculators/_field.html" with field=form.start_weekday %}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Adjusted schedule</legend>
+        <div class="fields">
+          {% include "calculators/_field.html" with field=form.mode full=True %}
+          <div id="alt-n-wrap">{% include "calculators/_field.html" with field=form.alt_n_fx %}</div>
+          <div id="alt-d-wrap">{% include "calculators/_field.html" with field=form.alt_dose_per_fx_gy %}</div>
+          {% include "calculators/_field.html" with field=form.alt_fx_per_day %}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Tissue parameters</legend>
+        <div class="fields" style="margin-bottom:10px">
+          <div class="field full">
+            <label for="tumor-preset">Tumor preset</label>
+            <select id="tumor-preset" class="no-print">
+              <option value="">— apply a preset —</option>
+              {% for p in presets.tumor %}<option value="{{ p.alpha_beta }}|{{ p.k }}|{{ p.tk }}">{{ p.label }} (α/β {{ p.alpha_beta }}, K {{ p.k }}, Tk {{ p.tk }})</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <table class="data">
+          <thead><tr><th>Tissue</th><th>α/β (Gy)</th><th>K (Gy/day)</th><th>Tk (days)</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Tumor</strong></td><td>{{ form.tumor_alpha_beta }}</td><td>{{ form.tumor_k }}</td><td>{{ form.tumor_tk }}</td></tr>
+            <tr><td><strong>Early-responding</strong></td><td>{{ form.early_alpha_beta }}</td><td>{{ form.early_k }}</td><td>{{ form.early_tk }}</td></tr>
+            <tr><td><strong>Late-responding</strong></td><td>{{ form.late_alpha_beta }}</td><td>{{ form.late_k }}</td><td>{{ form.late_tk }}</td></tr>
+          </tbody>
+        </table>
+        {% for f in form.param_errors %}<span class="err" style="color:var(--bad);font-size:12.5px;display:block">{{ f.0 }}: {{ f.1 }}</span>{% endfor %}
+      </fieldset>
+
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Calculate</button>
+        <a class="btn btn-secondary" href="{% url 'fractionation' %}">Reset</a>
+        {% if result %}<button class="btn btn-secondary" type="button" onclick="window.print()">Print</button>{% endif %}
+      </div>
+    </div>
+  </form>
+
+  <div>
+    {% if result %}
+    {% with ref=result.reference alt=result.alternative %}
+    <div class="card">
+      <div class="card-head"><h2>Result</h2>
+        <span class="hint">original {{ ref.n_fx }} fx × {{ ref.dose_per_fx|floatformat:"-2" }} Gy{% if ref.fx_per_day == 2 %} BID{% endif %} = {{ ref.total_dose|floatformat:"-2" }} Gy</span></div>
+      <div class="card-body">
+        {% if result.warnings %}
+        <div class="alert alert-warn"><strong>Check:</strong><ul>{% for w in result.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>
+        {% endif %}
+        <div class="result-hero">
+          {% if result.mode == "dose" %}
+          <div class="stat primary">
+            <div class="k">Dose per fraction</div>
+            <div class="v">{{ alt.dose_per_fx|floatformat:2 }}<span class="u">Gy</span></div>
+            <div class="u">× {{ alt.n_fx }} fx{% if alt.fx_per_day == 2 %} BID{% endif %} (exact {{ alt.dose_per_fx_exact|floatformat:3 }}, rounded up to the cGy)</div>
+          </div>
+          {% else %}
+          <div class="stat primary">
+            <div class="k">Number of fractions</div>
+            <div class="v">{{ alt.n_fx }}<span class="u">fx</span></div>
+            <div class="u">× {{ alt.dose_per_fx|floatformat:"-2" }} Gy{% if alt.fx_per_day == 2 %} BID{% endif %} (exact {{ result.n_fx_exact|floatformat:2 }} fx; smallest whole count that reaches the original BED)</div>
+          </div>
+          {% endif %}
+          <div class="stat">
+            <div class="k">Total dose</div>
+            <div class="v">{{ alt.total_dose|floatformat:"-2" }}<span class="u">Gy</span></div>
+            <div class="u">vs {{ ref.total_dose|floatformat:"-2" }} Gy original</div>
+          </div>
+          <div class="stat">
+            <div class="k">Overall time</div>
+            <div class="v">{{ alt.overall_days }}<span class="u">days</span></div>
+            <div class="u">first to last fraction, vs {{ ref.overall_days }} days original</div>
+          </div>
+        </div>
+        <div class="result-hero" style="margin-top:12px;grid-template-columns:repeat(2, 1fr)">
+          <div class="stat">
+            <div class="k">Total tumor BED — original schedule</div>
+            <div class="v">{{ ref.tumor.bed|floatformat:2 }}<span class="u">Gy</span></div>
+            <div class="u">{{ ref.n_fx }} fx × {{ ref.dose_per_fx|floatformat:"-2" }} Gy{% if ref.fx_per_day == 2 %} BID{% endif %}: dose term {{ ref.tumor.lq_bed|floatformat:2 }} − repopulation {{ ref.tumor.repop|floatformat:2 }} over {{ ref.overall_days }} days</div>
+          </div>
+          <div class="stat primary">
+            <div class="k">Total tumor BED — adjusted schedule</div>
+            <div class="v">{{ alt.tumor.bed|floatformat:2 }}<span class="u">Gy</span></div>
+            <div class="u">{{ alt.n_fx }} fx × {{ alt.dose_per_fx|floatformat:"-2" }} Gy{% if alt.fx_per_day == 2 %} BID{% endif %}: dose term {{ alt.tumor.lq_bed|floatformat:2 }} − repopulation {{ alt.tumor.repop|floatformat:2 }} over {{ alt.overall_days }} days</div>
+          </div>
+        </div>
+        <div class="result-hero" style="margin-top:12px">
+          {% for t in alt.tissues %}
+          <div class="stat">
+            <div class="k">{% if forloop.first %}Tumor BED{% else %}{{ t.name }}{% endif %}</div>
+            <div class="v">{{ t.percent_of_ref|floatformat:1 }}<span class="u">%</span></div>
+            <div class="u">of original ({{ t.bed|floatformat:1 }} / {{ t.reference|floatformat:1 }} Gy)</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Total BED by tissue</h2><span class="hint">biologically effective dose, Gy — not physical dose</span></div>
+      <div class="card-body">
+        <table class="data">
+          <thead>
+            <tr><th>Tissue</th><th class="num">Original</th><th class="num">Adjusted</th><th class="num">% of original</th><th class="num">EQD2 original → adjusted</th></tr>
+          </thead>
+          <tbody>
+            {% for t in alt.tissues %}
+            <tr{% if forloop.first %} class="total"{% endif %}>
+              <td style="min-width:150px"><strong>{{ t.name }}</strong><br><span class="label" style="font-size:12px;color:var(--muted)">α/β {{ t.alpha_beta }} · K {{ t.k }} · Tk {{ t.tk|floatformat:0 }}</span></td>
+              <td class="num">{{ t.reference|floatformat:2 }}<br><span class="label" style="font-size:12px;color:var(--muted);white-space:nowrap">{{ t.reference_lq_bed|floatformat:2 }} − {{ t.reference_repop|floatformat:2 }}</span></td>
+              <td class="num">{{ t.bed|floatformat:2 }}<br><span class="label" style="font-size:12px;color:var(--muted);white-space:nowrap">{{ t.lq_bed|floatformat:2 }} − {{ t.repop|floatformat:2 }}</span></td>
+              <td class="num">
+                {% if t.percent_of_ref >= 95 and t.percent_of_ref <= 105 %}<span class="badge badge-ok">{{ t.percent_of_ref|floatformat:1 }}%</span>
+                {% elif t.percent_of_ref > 105 %}<span class="badge badge-bad">{{ t.percent_of_ref|floatformat:1 }}%</span>
+                {% else %}<span class="badge badge-warn">{{ t.percent_of_ref|floatformat:1 }}%</span>{% endif %}
+              </td>
+              <td class="num" style="white-space:nowrap">{% if forloop.counter == 1 %}{{ ref.tumor.eqd2|floatformat:1 }}{% elif forloop.counter == 2 %}{{ ref.early.eqd2|floatformat:1 }}{% else %}{{ ref.late.eqd2|floatformat:1 }}{% endif %} → {{ t.eqd2|floatformat:1 }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="formula-note">BED = N·d·(1 + d/(α/β)) − K·(T − T<sub>k</sub>), with T each schedule's own overall time ({{ ref.overall_days }} days original, {{ alt.overall_days }} days adjusted). The small figures under each total are the dose term − the repopulation loss.
+           EQD2 is the dose term only, N·d·(1 + d/(α/β)) / (1 + 2/(α/β)), with no time correction; BED and EQD2 are only comparable at the same α/β.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Equivalent schedules</h2><span class="hint">same tumor BED as the original{% if alt.fx_per_day == 2 %} · BID{% endif %}</span></div>
+      <div class="card-body">
+        <table class="data">
+          <thead>
+            <tr><th>Schedule</th><th class="num">Total dose</th><th class="num">Overall time</th><th class="num">Tumor BED</th><th class="num">Tumor</th><th class="num">Early</th><th class="num">Late</th><th class="num">Late EQD2</th></tr>
+          </thead>
+          <tbody>
+            {% for s in result.table %}
+            <tr{% if s.is_selected %} class="total"{% endif %}>
+              <td style="white-space:nowrap"><strong>{{ s.n_fx }} fx × {{ s.dose_per_fx|floatformat:2 }} Gy</strong>{% if s.fx_per_day == 2 %} BID{% endif %}{% if s.is_reference %}<br><span class="label" style="font-size:12px;color:var(--muted)">original</span>{% elif s.is_selected %}<br><span class="label" style="font-size:12px;color:var(--muted)">shown above</span>{% endif %}</td>
+              <td class="num" style="white-space:nowrap">{{ s.total_dose|floatformat:"-2" }} Gy</td>
+              <td class="num">{{ s.overall_days }} d</td>
+              <td class="num" style="white-space:nowrap">{{ s.tumor.bed|floatformat:2 }} Gy</td>
+              <td class="num">{{ s.tumor.percent_of_ref|floatformat:1 }}%</td>
+              <td class="num">{{ s.early.percent_of_ref|floatformat:1 }}%</td>
+              <td class="num">
+                {% if s.late.percent_of_ref >= 95 and s.late.percent_of_ref <= 105 %}<span class="badge badge-ok">{{ s.late.percent_of_ref|floatformat:1 }}%</span>
+                {% elif s.late.percent_of_ref > 105 %}<span class="badge badge-bad">{{ s.late.percent_of_ref|floatformat:1 }}%</span>
+                {% else %}<span class="badge badge-warn">{{ s.late.percent_of_ref|floatformat:1 }}%</span>{% endif %}
+              </td>
+              <td class="num" style="white-space:nowrap">{{ s.late.eqd2|floatformat:1 }} Gy</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="formula-note">Each row solves the dose per fraction that matches the original tumor BED at that fraction count{% if alt.fx_per_day == 2 %}, given BID{% endif %}, rounded up to the cGy, so tumor is always at or just above 100%. Percentages are BED relative to the original schedule. Late EQD2 uses the late-tissue α/β with no time correction.</p>
+      </div>
+    </div>
+    {% endwith %}
+    {% else %}
+    <div class="card">
+      <div class="card-body empty">
+        <strong>No calculation yet</strong>
+        Complete the form and select Calculate.
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card no-print">
+      <div class="card-head"><h2>Model</h2></div>
+      <div class="card-body">
+        <div class="formula">BED = N · d · (1 + d / (α/β)) − K · (T − T<sub>k</sub>)&nbsp;&nbsp; for T ≥ T<sub>k</sub></div>
+        <p class="formula-note">N = number of fractions, d = dose per fraction (Gy), T = overall time in calendar days from the first to the last fraction (weekends count), T<sub>k</sub> = lag before rapid repopulation, K = daily BED-equivalent of repopulation. T follows from the fraction count: Monday–Friday from the chosen starting weekday, one or two fractions per treatment day.</p>
+        <p class="formula-note"><strong>Dose-per-fraction solver.</strong> For the chosen N, T is fixed, and d solves N·d·(1 + d/(α/β)) = BED<sub>original</sub> + K·(T − T<sub>k</sub>) (positive root of the quadratic), rounded up to the nearest cGy so the tumor BED is never below the original.</p>
+        <p class="formula-note"><strong>Fraction solver.</strong> For the chosen d, N is stepped up from 1 until N·d·(1 + d/(α/β)) − K·(T<sub>N</sub> − T<sub>k</sub>) reaches BED<sub>original</sub>; each added fraction also adds the repopulation cost of the extra calendar days.</p>
+        <p class="formula-note">A course that finishes before T<sub>k</sub> has no repopulation term. The linear-quadratic model is less reliable at large doses per fraction; a warning is shown above 10 Gy.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+  (function () {
+    var mode = document.getElementById('id_mode');
+    function show() {
+      var dose = mode.value === 'dose';
+      document.getElementById('alt-n-wrap').style.display = dose ? '' : 'none';
+      document.getElementById('alt-d-wrap').style.display = dose ? 'none' : '';
+    }
+    mode.addEventListener('change', show);
+    show();
+  })();
+  document.getElementById('tumor-preset').addEventListener('change', function () {
+    if (!this.value) return;
+    var p = this.value.split('|');
+    document.getElementById('id_tumor_alpha_beta').value = p[0];
+    document.getElementById('id_tumor_k').value = p[1];
+    document.getElementById('id_tumor_tk').value = p[2];
+  });
+{% endblock %}

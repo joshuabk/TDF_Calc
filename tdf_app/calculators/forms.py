@@ -177,3 +177,54 @@ class BEDEQD2Form(forms.Form):
     n_fx = _int("Number of fractions", 30, min_value=1)
     tumor_alpha_beta = _num("Tumor \u03b1/\u03b2 (Gy)", DEFAULT_TUMOR.alpha_beta, min_value=0.1)
     late_alpha_beta = _num("Late normal tissue \u03b1/\u03b2 (Gy)", DEFAULT_LATE.alpha_beta, min_value=0.1)
+
+
+class FractionationForm(forms.Form):
+    MODE_CHOICES = [
+        ("dose", "Choose the number of fractions — solve the dose per fraction"),
+        ("fractions", "Choose the dose per fraction — solve the number of fractions"),
+    ]
+    PER_DAY_CHOICES = [(1, "Once daily"), (2, "BID — 2 fx/day, ≥ 6 h apart")]
+    WEEKDAY_CHOICES = [(0, "Monday"), (1, "Tuesday"), (2, "Wednesday"), (3, "Thursday"), (4, "Friday")]
+    MAX_FX = 100
+
+    # Reference schedule
+    ref_dose_per_fx_gy = _num("Dose per fraction (Gy)", 2, step="0.01", min_value=0.01)
+    ref_n_fx = forms.IntegerField(label="Number of fractions", initial=30, min_value=1, max_value=MAX_FX)
+    ref_fx_per_day = forms.TypedChoiceField(label="Fractions per day", choices=PER_DAY_CHOICES, coerce=int, initial=1)
+
+    # Alternative schedule
+    mode = forms.ChoiceField(label="Calculation", choices=MODE_CHOICES, initial="dose")
+    alt_n_fx = forms.IntegerField(label="Adjusted number of fractions", initial=20, min_value=1,
+                                  max_value=MAX_FX, required=False)
+    alt_dose_per_fx_gy = _num("Adjusted dose per fraction (Gy)", None, step="0.01", min_value=0.01, required=False)
+    alt_fx_per_day = forms.TypedChoiceField(label="Fractions per day", choices=PER_DAY_CHOICES, coerce=int, initial=1)
+
+    start_weekday = forms.TypedChoiceField(
+        label="First treatment falls on a", choices=WEEKDAY_CHOICES, coerce=int, initial=0,
+        help_text="Sets how many weekends each course spans. Treatment is Monday–Friday.")
+
+    # Tissue parameters
+    tumor_alpha_beta = _num("α/β (Gy)", DEFAULT_TUMOR.alpha_beta, step="0.1", min_value=0.1)
+    tumor_k = _num("K (Gy/day)", DEFAULT_TUMOR.k, step="0.01")
+    tumor_tk = _num("Tk (days)", DEFAULT_TUMOR.tk, step="1")
+
+    early_alpha_beta = _num("α/β (Gy)", DEFAULT_EARLY.alpha_beta, step="0.1", min_value=0.1)
+    early_k = _num("K (Gy/day)", DEFAULT_EARLY.k, step="0.01")
+    early_tk = _num("Tk (days)", DEFAULT_EARLY.tk, step="1")
+
+    late_alpha_beta = _num("α/β (Gy)", DEFAULT_LATE.alpha_beta, step="0.1", min_value=0.1)
+    late_k = _num("K (Gy/day)", DEFAULT_LATE.k, step="0.01")
+    late_tk = _num("Tk (days)", DEFAULT_LATE.tk, step="1")
+
+    PARAM_FIELDS = BEDForm.PARAM_FIELDS
+    param_errors = BEDForm.param_errors
+
+    def clean(self):
+        c = super().clean()
+        mode = c.get("mode")
+        if mode == "dose" and c.get("alt_n_fx") is None and "alt_n_fx" not in self.errors:
+            self.add_error("alt_n_fx", "Enter the adjusted number of fractions.")
+        if mode == "fractions" and c.get("alt_dose_per_fx_gy") is None and "alt_dose_per_fx_gy" not in self.errors:
+            self.add_error("alt_dose_per_fx_gy", "Enter the adjusted dose per fraction.")
+        return c

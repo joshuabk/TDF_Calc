@@ -1,7 +1,7 @@
 from django.shortcuts import render
 
 from . import engine
-from .forms import BEDEQD2Form, BEDForm, TDFForm
+from .forms import BEDEQD2Form, BEDForm, FractionationForm, TDFForm
 
 
 def home(request):
@@ -86,6 +86,34 @@ def bed_eqd2_view(request):
         form = BEDEQD2Form()
     return render(request, "calculators/bed_eqd2.html",
                   {"form": form, "result": result, "error": error, "active": "bed_eqd2"})
+
+
+def fractionation_view(request):
+    result = None
+    error = None
+    if request.method == "POST":
+        form = FractionationForm(request.POST)
+        if form.is_valid():
+            d = form.cleaned_data
+            inp = engine.FractionationInput(
+                ref_dose_per_fx_gy=d["ref_dose_per_fx_gy"], ref_n_fx=d["ref_n_fx"],
+                ref_fx_per_day=d["ref_fx_per_day"],
+                mode=d["mode"], alt_n_fx=d["alt_n_fx"], alt_dose_per_fx_gy=d["alt_dose_per_fx_gy"],
+                alt_fx_per_day=d["alt_fx_per_day"], start_weekday=d["start_weekday"],
+                tumor=engine.TissueParams(d["tumor_alpha_beta"], d["tumor_k"], d["tumor_tk"]),
+                early=engine.TissueParams(d["early_alpha_beta"], d["early_k"], d["early_tk"]),
+                late=engine.TissueParams(d["late_alpha_beta"], d["late_k"], d["late_tk"]),
+            )
+            try:
+                result = engine.calculate_fractionation(inp)
+            except (ValueError, ZeroDivisionError, OverflowError) as exc:
+                error = str(exc)
+    else:
+        form = FractionationForm()
+    return render(request, "calculators/fractionation.html", {
+        "form": form, "result": result, "error": error, "active": "fractionation",
+        "presets": engine.TISSUE_PRESETS,
+    })
 
 
 def reference_view(request):

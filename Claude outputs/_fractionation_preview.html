@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fx Adjust · Northside Hospital Radiation Oncology</title>
+  <style>/* Northside Hospital Radiation Oncology — Treatment Interruption Calculator */
+:root {
+  --navy: #0b2a4a;
+  --navy-2: #123b66;
+  --teal: #0e7c86;
+  --teal-light: #e6f3f4;
+  --ink: #1d2630;
+  --muted: #5b6673;
+  --line: #d9dfe6;
+  --bg: #f3f5f8;
+  --card: #ffffff;
+  --ok: #1e7f4f;
+  --ok-bg: #e9f6ee;
+  --warn: #9a5b00;
+  --warn-bg: #fff6e5;
+  --bad: #b3261e;
+  --bad-bg: #fdecea;
+  --radius: 8px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .1);
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+html { font-size: 15px; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.45;
+}
+a { color: var(--teal); }
+
+/* Header */
+.topbar { background: var(--navy); color: #fff; border-bottom: 4px solid var(--teal); }
+.topbar-inner {
+  max-width: 1180px; margin: 0 auto; padding: 14px 24px;
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+}
+.brand { display: flex; align-items: center; gap: 14px; text-decoration: none; color: #fff; }
+.brand-mark {
+  width: 40px; height: 40px; border-radius: 8px; background: var(--teal);
+  display: grid; place-items: center; font-weight: 700; font-size: 18px; letter-spacing: .5px;
+}
+.brand-title { font-size: 17px; font-weight: 600; line-height: 1.2; }
+.brand-sub { font-size: 12.5px; opacity: .8; }
+.nav { display: flex; gap: 4px; flex-wrap: wrap; }
+.nav a {
+  color: #d6e1ee; text-decoration: none; padding: 8px 12px; border-radius: 6px; font-size: 14px;
+}
+.nav a:hover { background: rgba(255,255,255,.08); color: #fff; }
+.nav a.active { background: rgba(255,255,255,.14); color: #fff; font-weight: 600; }
+
+/* Layout */
+.page { max-width: 1180px; margin: 0 auto; padding: 24px; }
+.page-head { margin-bottom: 18px; }
+.page-head h1 { margin: 0 0 4px; font-size: 24px; font-weight: 650; color: var(--navy); }
+.page-head p { margin: 0; color: var(--muted); max-width: 820px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+@media (max-width: 900px) { .grid, .grid-3 { grid-template-columns: 1fr; } }
+
+/* Cards */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.card-head {
+  padding: 12px 18px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.card-head h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--navy); text-transform: uppercase; letter-spacing: .4px; }
+.card-head .hint { font-size: 12.5px; color: var(--muted); }
+.card-body { padding: 18px; }
+.card + .card { margin-top: 20px; }
+
+/* Forms */
+fieldset { border: 0; padding: 0; margin: 0 0 18px; }
+fieldset:last-of-type { margin-bottom: 0; }
+legend {
+  font-size: 13px; font-weight: 650; color: var(--teal); text-transform: uppercase;
+  letter-spacing: .5px; padding: 0; margin-bottom: 10px;
+}
+.fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 16px; }
+.fields.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field.full { grid-column: 1 / -1; }
+.field label { font-size: 13px; font-weight: 600; color: var(--ink); }
+.field input, .field select {
+  font: inherit; padding: 8px 10px; border: 1px solid #b9c3cf; border-radius: 6px;
+  background: #fff; color: var(--ink); width: 100%;
+}
+.field input:focus, .field select:focus { outline: 2px solid var(--teal); outline-offset: 0; border-color: var(--teal); }
+.field .help { font-size: 12px; color: var(--muted); }
+.field .err { font-size: 12.5px; color: var(--bad); }
+.field.has-error input { border-color: var(--bad); }
+.form-errors { background: var(--bad-bg); color: var(--bad); border: 1px solid #f1b8b3; border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; font-size: 13.5px; }
+.actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.btn {
+  font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 6px; cursor: pointer;
+  border: 1px solid transparent; text-decoration: none; display: inline-block;
+}
+.btn-primary { background: var(--teal); color: #fff; }
+.btn-primary:hover { background: #0a6a73; }
+.btn-secondary { background: #fff; color: var(--navy); border-color: #b9c3cf; }
+.btn-secondary:hover { background: #f3f5f8; }
+
+/* Results */
+.result-hero {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;
+}
+.stat { padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: #fafbfc; }
+.stat .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+.stat .v { font-size: 26px; font-weight: 700; color: var(--navy); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.stat .u { font-size: 13px; color: var(--muted); font-weight: 500; }
+.stat.primary { background: var(--teal-light); border-color: #b5dde1; }
+.stat.primary .v { color: var(--teal); font-size: 34px; }
+
+table.data { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.data th, table.data td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+table.data th { font-size: 12.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); font-weight: 650; background: #fafbfc; }
+table.data td.num, table.data th.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.data td.num { font-family: var(--mono); font-size: 13.5px; }
+table.data tr.total td { font-weight: 700; background: #fafbfc; }
+table.data td.label { color: var(--muted); }
+table.data tr:last-child td { border-bottom: 0; }
+
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 650; }
+.badge-ok { background: var(--ok-bg); color: var(--ok); }
+.badge-warn { background: var(--warn-bg); color: var(--warn); }
+.badge-bad { background: var(--bad-bg); color: var(--bad); }
+
+.alert { padding: 10px 14px; border-radius: 6px; font-size: 13.5px; margin-bottom: 12px; border: 1px solid; }
+.alert-warn { background: var(--warn-bg); color: var(--warn); border-color: #f0d9a8; }
+.alert-bad { background: var(--bad-bg); color: var(--bad); border-color: #f1b8b3; }
+.alert-info { background: var(--teal-light); color: #0a5b63; border-color: #b5dde1; }
+.alert ul { margin: 4px 0 0 18px; padding: 0; }
+
+.summary-text { font-size: 15px; line-height: 1.6; padding: 14px 16px; background: #fafbfc; border-left: 4px solid var(--teal); border-radius: 4px; }
+
+.formula { font-family: var(--mono); font-size: 13px; background: #f7f9fb; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; color: var(--navy); overflow-x: auto; }
+.formula-note { font-size: 12.5px; color: var(--muted); margin: 6px 0 0; }
+
+.empty { color: var(--muted); text-align: center; padding: 40px 20px; }
+.empty strong { display: block; color: var(--navy); font-size: 16px; margin-bottom: 4px; }
+
+/* Home */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+.tile { display: block; text-decoration: none; color: inherit; padding: 20px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.tile:hover { border-color: var(--teal); }
+.tile h3 { margin: 0 0 6px; color: var(--navy); font-size: 17px; }
+.tile p { margin: 0; color: var(--muted); font-size: 14px; }
+.tile .tag { display: inline-block; font-size: 11.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--teal); margin-bottom: 8px; }
+
+/* Footer & print */
+.footer { max-width: 1180px; margin: 0 auto; padding: 18px 24px 32px; color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--line); }
+.print-meta { display: none; }
+@media print {
+  body { background: #fff; }
+  .topbar, .actions, .nav, .no-print, .footer { display: none !important; }
+  .page { padding: 0; max-width: none; }
+  .card { box-shadow: none; break-inside: avoid; }
+  .grid { grid-template-columns: 1fr; }
+  .print-meta { display: block; font-size: 12px; color: var(--muted); margin-bottom: 12px; border-bottom: 1px solid #000; padding-bottom: 6px; }
+  .field input { border: 0; border-bottom: 1px solid #999; border-radius: 0; padding: 2px 0; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/">
+      <div class="brand-mark">RO</div>
+      <div>
+        <div class="brand-title">Treatment Interruption Calculator</div>
+        <div class="brand-sub">Northside Hospital · Radiation Oncology Physics</div>
+      </div>
+    </a>
+    <nav class="nav">
+      <a href="/bed/" class="">BED / LQ</a>
+      <a href="/bed-eqd2/" class="">BED / EQD2</a>
+      <a href="/fractionation/" class="active">Fx Adjust</a>
+      <a href="/tdf/" class="">TDF</a>
+      <a href="/reference/" class="">α/β Reference</a>
+      <a href="/rule-of-thumb/" class="">Rule of Thumb</a>
+    </nav>
+  </div>
+</header>
+
+<main class="page">
+  <div class="print-meta">Northside Hospital Radiation Oncology — Treatment Interruption Calculator — printed <span id="print-date"></span></div>
+  
+<div class="page-head">
+  <h1>Fx Adjust — Same Tumor BED, Different Fractionation</h1>
+  <p>Adjusts the number of fractions or the dose per fraction of a schedule, holding the tumor BED
+     the same with repopulation included: a shorter course loses less to repopulation and needs less dose, a longer
+     one needs more. Shows what each schedule does to early- and late-responding normal tissue. Both courses are
+     uninterrupted and treated Monday–Friday. Dose in Gy.</p>
+</div>
+
+<div class="grid">
+  <form method="post" class="card" novalidate id="fx-form">
+    <input type="hidden" name="csrfmiddlewaretoken" value="lzlqYeI5bKu3CGyOUxtSCsYQnjY5bl3zuvV44kgeAR6B8ZcMEIeDYgJtzS2Qun4r">
+    <div class="card-head"><h2>Inputs</h2><span class="hint">Dose in Gy</span></div>
+    <div class="card-body">
+      
+      
+
+      <fieldset>
+        <legend>Original schedule</legend>
+        <div class="fields">
+          <div class="field ">
+  <label for="id_ref_dose_per_fx_gy">Dose per fraction (Gy)</label>
+  <input type="number" name="ref_dose_per_fx_gy" value="2" step="0.01" min="0.01" required id="id_ref_dose_per_fx_gy">
+  
+  
+</div>
+
+          <div class="field ">
+  <label for="id_ref_n_fx">Number of fractions</label>
+  <input type="number" name="ref_n_fx" value="30" min="1" max="100" required id="id_ref_n_fx">
+  
+  
+</div>
+
+          <div class="field ">
+  <label for="id_ref_fx_per_day">Fractions per day</label>
+  <select name="ref_fx_per_day" id="id_ref_fx_per_day">
+  <option value="1" selected>Once daily</option>
+
+  <option value="2">BID — 2 fx/day, ≥ 6 h apart</option>
+
+</select>
+  
+  
+</div>
+
+          <div class="field ">
+  <label for="id_start_weekday">First treatment falls on a</label>
+  <select name="start_weekday" aria-describedby="id_start_weekday_helptext" id="id_start_weekday">
+  <option value="0" selected>Monday</option>
+
+  <option value="1">Tuesday</option>
+
+  <option value="2">Wednesday</option>
+
+  <option value="3">Thursday</option>
+
+  <option value="4">Friday</option>
+
+</select>
+  <span class="help">Sets how many weekends each course spans. Treatment is Monday–Friday.</span>
+  
+</div>
+
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Adjusted schedule</legend>
+        <div class="fields">
+          <div class="field  full">
+  <label for="id_mode">Calculation</label>
+  <select name="mode" id="id_mode">
+  <option value="dose" selected>Choose the number of fractions — solve the dose per fraction</option>
+
+  <option value="fractions">Choose the dose per fraction — solve the number of fractions</option>
+
+</select>
+  
+  
+</div>
+
+          <div id="alt-n-wrap"><div class="field ">
+  <label for="id_alt_n_fx">Adjusted number of fractions</label>
+  <input type="number" name="alt_n_fx" value="35" min="1" max="100" id="id_alt_n_fx">
+  
+  
+</div>
+</div>
+          <div id="alt-d-wrap"><div class="field ">
+  <label for="id_alt_dose_per_fx_gy">Adjusted dose per fraction (Gy)</label>
+  <input type="number" name="alt_dose_per_fx_gy" step="0.01" min="0.01" id="id_alt_dose_per_fx_gy">
+  
+  
+</div>
+</div>
+          <div class="field ">
+  <label for="id_alt_fx_per_day">Fractions per day</label>
+  <select name="alt_fx_per_day" id="id_alt_fx_per_day">
+  <option value="1" selected>Once daily</option>
+
+  <option value="2">BID — 2 fx/day, ≥ 6 h apart</option>
+
+</select>
+  
+  
+</div>
+
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Tissue parameters</legend>
+        <div class="fields" style="margin-bottom:10px">
+          <div class="field full">
+            <label for="tumor-preset">Tumor preset</label>
+            <select id="tumor-preset" class="no-print">
+              <option value="">— apply a preset —</option>
+              <option value="10|0.6|28">Rapidly growing tumor (default) (α/β 10, K 0.6, Tk 28)</option><option value="3|0.6|28">Generic tumor (worksheet default) (α/β 3, K 0.6, Tk 28)</option><option value="1.5|0.1|0">Slow growing tumor (e.g. prostate) (α/β 1.5, K 0.1, Tk 0)</option>
+            </select>
+          </div>
+        </div>
+        <table class="data">
+          <thead><tr><th>Tissue</th><th>α/β (Gy)</th><th>K (Gy/day)</th><th>Tk (days)</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Tumor</strong></td><td><input type="number" name="tumor_alpha_beta" value="10" step="0.1" min="0.1" required id="id_tumor_alpha_beta"></td><td><input type="number" name="tumor_k" value="0.6" step="0.01" min="0" required id="id_tumor_k"></td><td><input type="number" name="tumor_tk" value="28" step="1" min="0" required id="id_tumor_tk"></td></tr>
+            <tr><td><strong>Early-responding</strong></td><td><input type="number" name="early_alpha_beta" value="10" step="0.1" min="0.1" required id="id_early_alpha_beta"></td><td><input type="number" name="early_k" value="0.25" step="0.01" min="0" required id="id_early_k"></td><td><input type="number" name="early_tk" value="0" step="1" min="0" required id="id_early_tk"></td></tr>
+            <tr><td><strong>Late-responding</strong></td><td><input type="number" name="late_alpha_beta" value="2.5" step="0.1" min="0.1" required id="id_late_alpha_beta"></td><td><input type="number" name="late_k" value="0" step="0.01" min="0" required id="id_late_k"></td><td><input type="number" name="late_tk" value="0" step="1" min="0" required id="id_late_tk"></td></tr>
+          </tbody>
+        </table>
+        
+      </fieldset>
+
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Calculate</button>
+        <a class="btn btn-secondary" href="/fractionation/">Reset</a>
+        <button class="btn btn-secondary" type="button" onclick="window.print()">Print</button>
+      </div>
+    </div>
+  </form>
+
+  <div>
+    
+    
+    <div class="card">
+      <div class="card-head"><h2>Result</h2>
+        <span class="hint">original 30 fx × 2 Gy = 60 Gy</span></div>
+      <div class="card-body">
+        
+        <div class="result-hero">
+          
+          <div class="stat primary">
+            <div class="k">Dose per fraction</div>
+            <div class="v">1.84<span class="u">Gy</span></div>
+            <div class="u">× 35 fx (exact 1.839, rounded up to the cGy)</div>
+          </div>
+          
+          <div class="stat">
+            <div class="k">Total dose</div>
+            <div class="v">64.40<span class="u">Gy</span></div>
+            <div class="u">vs 60 Gy original</div>
+          </div>
+          <div class="stat">
+            <div class="k">Overall time</div>
+            <div class="v">46<span class="u">days</span></div>
+            <div class="u">first to last fraction, vs 39 days original</div>
+          </div>
+        </div>
+        <div class="result-hero" style="margin-top:12px;grid-template-columns:repeat(2, 1fr)">
+          <div class="stat">
+            <div class="k">Total tumor BED — original schedule</div>
+            <div class="v">65.40<span class="u">Gy</span></div>
+            <div class="u">30 fx × 2 Gy: dose term 72.00 − repopulation 6.60 over 39 days</div>
+          </div>
+          <div class="stat primary">
+            <div class="k">Total tumor BED — adjusted schedule</div>
+            <div class="v">65.45<span class="u">Gy</span></div>
+            <div class="u">35 fx × 1.84 Gy: dose term 76.25 − repopulation 10.80 over 46 days</div>
+          </div>
+        </div>
+        <div class="result-hero" style="margin-top:12px">
+          
+          <div class="stat">
+            <div class="k">Tumor BED</div>
+            <div class="v">100.1<span class="u">%</span></div>
+            <div class="u">of original (65.4 / 65.4 Gy)</div>
+          </div>
+          
+          <div class="stat">
+            <div class="k">Early normal tissue</div>
+            <div class="v">104.0<span class="u">%</span></div>
+            <div class="u">of original (64.7 / 62.3 Gy)</div>
+          </div>
+          
+          <div class="stat">
+            <div class="k">Late normal tissue</div>
+            <div class="v">103.5<span class="u">%</span></div>
+            <div class="u">of original (111.8 / 108.0 Gy)</div>
+          </div>
+          
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Total BED by tissue</h2><span class="hint">biologically effective dose, Gy — not physical dose</span></div>
+      <div class="card-body">
+        <table class="data">
+          <thead>
+            <tr><th>Tissue</th><th class="num">Original</th><th class="num">Adjusted</th><th class="num">% of original</th><th class="num">EQD2 original → adjusted</th></tr>
+          </thead>
+          <tbody>
+            
+            <tr class="total">
+              <td style="min-width:150px"><strong>Tumor</strong><br><span class="label" style="font-size:12px;color:var(--muted)">α/β 10.0 · K 0.6 · Tk 28</span></td>
+              <td class="num">65.40<br><span class="label" style="font-size:12px;color:var(--muted)">72.00 − 6.60</span></td>
+              <td class="num">65.45<br><span class="label" style="font-size:12px;color:var(--muted)">76.25 − 10.80</span></td>
+              <td class="num">
+                <span class="badge badge-ok">100.1%</span>
+                
+              </td>
+              <td class="num" style="white-space:nowrap">60.0 → 63.5</td>
+            </tr>
+            
+            <tr>
+              <td style="min-width:150px"><strong>Early normal tissue</strong><br><span class="label" style="font-size:12px;color:var(--muted)">α/β 10.0 · K 0.25 · Tk 0</span></td>
+              <td class="num">62.25<br><span class="label" style="font-size:12px;color:var(--muted)">72.00 − 9.75</span></td>
+              <td class="num">64.75<br><span class="label" style="font-size:12px;color:var(--muted)">76.25 − 11.50</span></td>
+              <td class="num">
+                <span class="badge badge-ok">104.0%</span>
+                
+              </td>
+              <td class="num" style="white-space:nowrap">60.0 → 63.5</td>
+            </tr>
+            
+            <tr>
+              <td style="min-width:150px"><strong>Late normal tissue</strong><br><span class="label" style="font-size:12px;color:var(--muted)">α/β 2.5 · K 0.0 · Tk 0</span></td>
+              <td class="num">108.00<br><span class="label" style="font-size:12px;color:var(--muted)">108.00 − 0.00</span></td>
+              <td class="num">111.80<br><span class="label" style="font-size:12px;color:var(--muted)">111.80 − 0.00</span></td>
+              <td class="num">
+                <span class="badge badge-ok">103.5%</span>
+                
+              </td>
+              <td class="num" style="white-space:nowrap">60.0 → 62.1</td>
+            </tr>
+            
+          </tbody>
+        </table>
+        <p class="formula-note">BED = N·d·(1 + d/(α/β)) − K·(T − T<sub>k</sub>), with T each schedule's own overall time (39 days original, 46 days adjusted). The small figures under each total are the dose term − the repopulation loss.
+           EQD2 is the dose term only, N·d·(1 + d/(α/β)) / (1 + 2/(α/β)), with no time correction; BED and EQD2 are only comparable at the same α/β.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Equivalent schedules</h2><span class="hint">same tumor BED as the original</span></div>
+      <div class="card-body">
+        <table class="data">
+          <thead>
+            <tr><th>Schedule</th><th class="num">Total dose</th><th class="num">Overall time</th><th class="num">Tumor BED</th><th class="num">Tumor</th><th class="num">Early</th><th class="num">Late</th><th class="num">Late EQD2</th></tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td style="white-space:nowrap"><strong>30 fx × 2.00 Gy</strong><br><span class="label" style="font-size:12px;color:var(--muted)">original</span></td>
+              <td class="num" style="white-space:nowrap">60 Gy</td>
+              <td class="num">39 d</td>
+              <td class="num" style="white-space:nowrap">65.40 Gy</td>
+              <td class="num">100.0%</td>
+              <td class="num">100.0%</td>
+              <td class="num">
+                <span class="badge badge-ok">100.0%</span>
+                
+              </td>
+              <td class="num" style="white-space:nowrap">60.0 Gy</td>
+            </tr>
+            
+            <tr>
+              <td style="white-space:nowrap"><strong>5 fx × 7.49 Gy</strong></td>
+              <td class="num" style="white-space:nowrap">37.45 Gy</td>
+              <td class="num">4 d</td>
+              <td class="num" style="white-space:nowrap">65.50 Gy</td>
+              <td class="num">100.2%</td>
+              <td class="num">103.6%</td>
+              <td class="num">
+                <span class="badge badge-bad">138.6%</span>
+                
+              </td>
+              <td class="num" style="white-space:nowrap">83.1 Gy</td>
+            </tr>
+            
+            <tr>
+              <td style="white-space:nowrap"><strong>10 fx × 4.51 Gy</strong></td>
+              <td class="num" style="white-space:nowrap">45.10 Gy</td>
+              <td class="num">11 d</td>
+              <td class="num" style="white-space:nowrap">65.44 Gy</td>
+              <td class="num">100.1%</td>
+              <td class="num">100.7%</td>
+              <td class="num">
+                <span class="badge badge-bad">117.1%</span>
+                
+              </td>
+              <td class="num" style="white-space:nowrap">70.3 Gy</td>
+            </tr>
+            
+            <tr>
+              <td style="white-space:nowrap"><strong>15 fx × 3.29 Gy</strong></td>
+              <td class="num" style="white-space:nowrap">49.35 Gy</td>
+              <td class="num">18 d</td>
+              <td class="num" style="white-space:nowrap">65.59 Gy</td>
+              <td class="num">100.3%</td>
+              <td class="num">98.1%</td>
+              <td class="num">
+                <span class="badge badge-bad">105.8%</span>
+                
+              </td>
+              <td class="num" style="white-space:nowrap">63.5 Gy</td>
+            </tr>
+            
+            <tr>
+              <td style="white-space:nowrap"><strong>20 fx × 2.60 Gy</strong></td>
+              <td class="num" style="white-space:nowrap">52 Gy</td>
+              <td class="num">25 d</td>
+              <td class="num" style="white-space:nowrap">65.52 Gy</td>
+              <td class="num">100.2%</td>
+              <td class="num">95.2%</td>
+              <td class="num">
+                <span class="badge badge-ok">98.2%</span>
+                
+              </td>
+              <td class="num" style="white-space:nowrap">58.9 Gy</td>
+            </tr>
+            
+            <tr>
+              <td style="white-space:nowrap"><strong>25 fx × 2.22 Gy</strong></td>
+              <td class="num" style="white-space:nowrap">55.50 Gy</td>
+              <td class="num">32 d</td>
+              <td class="num" style="white-space:nowrap">65.42 Gy</td>
+              <td class="num">100.0%</td>
+              <td class="num">96.1%</td>
+              <td class="num">
+                <span class="badge badge-ok">97.0%</span>
+                
+              </td>
+              <td class="num" style="white-space:nowrap">58.2 Gy</td>
+            </tr>
+            
+            <tr>
+              <td style="white-space:nowrap"><strong>30 fx × 2.00 Gy</strong></td>
+              <td class="num" style="white-space:nowrap">60 Gy</td>
+              <td class="num">39 d</td>
+              <td class="num" style="white-space:nowrap">65.40 Gy</td>
+              <td class="num">100.0%</td>
+              <td class="num">100.0%</td>
+              <td class="num">
+                <span class="badge badge-ok">100.0%</span>
+                
+              </td>
+              <td class="num" style="white-space:nowrap">60.0 Gy</td>
+            </tr>
+            
+            <tr class="total">
+              <td style="white-space:nowrap"><strong>35 fx × 1.84 Gy</strong><br><span class="label" style="font-size:12px;color:var(--muted)">shown above</span></td>
+              <td class="num" style="white-space:nowrap">64.40 Gy</td>
+              <td class="num">46 d</td>
+              <td class="num" style="white-space:nowrap">65.45 Gy</td>
+              <td class="num">100.1%</td>
+              <td class="num">104.0%</td>
+              <td class="num">
+                <span class="badge badge-ok">103.5%</span>
+                
+              </td>
+              <td class="num" style="white-space:nowrap">62.1 Gy</td>
+            </tr>
+            
+            <tr>
+              <td style="white-space:nowrap"><strong>40 fx × 1.72 Gy</strong></td>
+              <td class="num" style="white-space:nowrap">68.80 Gy</td>
+              <td class="num">53 d</td>
+              <td class="num" style="white-space:nowrap">65.63 Gy</td>
+              <td class="num">100.4%</td>
+              <td class="num">108.2%</td>
+              <td class="num">
+                <span class="badge badge-bad">107.5%</span>
+                
+              </td>
+              <td class="num" style="white-space:nowrap">64.5 Gy</td>
+            </tr>
+            
+          </tbody>
+        </table>
+        <p class="formula-note">Each row solves the dose per fraction that matches the original tumor BED at that fraction count, rounded up to the cGy, so tumor is always at or just above 100%. Percentages are BED relative to the original schedule. Late EQD2 uses the late-tissue α/β with no time correction.</p>
+      </div>
+    </div>
+    
+    
+
+    <div class="card no-print">
+      <div class="card-head"><h2>Model</h2></div>
+      <div class="card-body">
+        <div class="formula">BED = N · d · (1 + d / (α/β)) − K · (T − T<sub>k</sub>)&nbsp;&nbsp; for T ≥ T<sub>k</sub></div>
+        <p class="formula-note">N = number of fractions, d = dose per fraction (Gy), T = overall time in calendar days from the first to the last fraction (weekends count), T<sub>k</sub> = lag before rapid repopulation, K = daily BED-equivalent of repopulation. T follows from the fraction count: Monday–Friday from the chosen starting weekday, one or two fractions per treatment day.</p>
+        <p class="formula-note"><strong>Dose-per-fraction solver.</strong> For the chosen N, T is fixed, and d solves N·d·(1 + d/(α/β)) = BED<sub>original</sub> + K·(T − T<sub>k</sub>) (positive root of the quadratic), rounded up to the nearest cGy so the tumor BED is never below the original.</p>
+        <p class="formula-note"><strong>Fraction solver.</strong> For the chosen d, N is stepped up from 1 until N·d·(1 + d/(α/β)) − K·(T<sub>N</sub> − T<sub>k</sub>) reaches BED<sub>original</sub>; each added fraction also adds the repopulation cost of the extra calendar days.</p>
+        <p class="formula-note">A course that finishes before T<sub>k</sub> has no repopulation term. The linear-quadratic model is less reliable at large doses per fraction; a warning is shown above 10 Gy.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+
+<footer class="footer">
+  For use by qualified medical physicists and radiation oncologists. Results are decision support only and must be
+  reviewed and approved by the attending radiation oncologist. Formulas reproduce the departmental Treatment
+  Interruption Worksheet (TDF: Orton &amp; Ellis; BED: linear-quadratic model with repopulation).
+</footer>
+<script>
+  document.getElementById('print-date').textContent = new Date().toLocaleString();
+  
+  (function () {
+    var mode = document.getElementById('id_mode');
+    function show() {
+      var dose = mode.value === 'dose';
+      document.getElementById('alt-n-wrap').style.display = dose ? '' : 'none';
+      document.getElementById('alt-d-wrap').style.display = dose ? 'none' : '';
+    }
+    mode.addEventListener('change', show);
+    show();
+  })();
+  document.getElementById('tumor-preset').addEventListener('change', function () {
+    if (!this.value) return;
+    var p = this.value.split('|');
+    document.getElementById('id_tumor_alpha_beta').value = p[0];
+    document.getElementById('id_tumor_k').value = p[1];
+    document.getElementById('id_tumor_tk').value = p[2];
+  });
+
+</script>
+</body>
+</html>
